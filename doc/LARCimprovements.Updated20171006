@@ -1,0 +1,226 @@
+/******************************************************************
+ *                                                                *
+ * Copyright 2014, Institute for Defense Analyses                 *
+ * 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           *
+ * This material may be reproduced by or for the US Government    *
+ * pursuant to the copyright license under the clauses at DFARS   *
+ * 252.227-7013 and 252.227-7014.                                 *
+ *                                                                *
+ * LARC (Linear Algebra via Recursive Compression)                *
+ * Authors:                                                       *
+ *   - Steve Cuccaro (IDA-CCS)                                    *
+ *   - John Daly (LPS)                                            *
+ *   - John Gilbert (UCSB, IDA adjunct)                           *
+ *   - Jenny Zito (IDA-CCS)                                       *
+ *                                                                *
+ * Additional contributors are listed in "LARCcontributors".      *
+ *                                                                *
+ * POC: Jennifer Zito <jszito@super.org>                          *
+ * Please contact the POC before disseminating this code.         *
+ *                                                                *
+ *****************************************************************/
+
+
+Changes in GRCS/LARC from August 2016 to Oct 2, 2017
+====================================================
+
+
+Name GRCS -> LARC: Linear Algebra via Recursive Compression (Oct 2017)
+----------------------------------------------------------------------
+* We decided to rename our math package from 
+  GRCS  = Global Recursive Compression Scheme
+  for several reasons to something more simple before release.  
+  The name with the most votes was suggested by John Gilbert
+  CLAMOR = Compressed Linear Algebra with Memoization Of Results.
+  However, there was a big possibility this would create issues
+  with the program CLAMR with is in the LANL git repository
+  Hence, we went with the next most popular, suggested by Bill Carlson
+  LARC  = Linear Algebra via Recursive Compression.
+
+
+Cleaned up reporting functions (Sept 2017)
+------------------------------------------
+
+
+Improved values for ZEROBITTHRESH and SIGHASH (Sept 2017)
+---------------------------------------------------------
+* There are two parameters ZEROBITTHRESH and SIGHASH used in
+  the approximation algorithm for hash retrieval of scalars.
+  We formerly were using ZEROBITTHRESH around 20 bits, which was
+  creating problems.  We reset ZEROBITTHRESH and SIGHASH to be
+  DBL_MANT_DIG-2 = 51.  This has solved some problems.  
+* However, we still need to work on numerical precision issues, 
+  because ZEROBITTHRESH currently needs to be no more than 52 to
+  have the 8th root of unity w, satisfy the identity w^4 = -1.
+  However, we believe it is preferred for some applications to
+  have ZEROBITTHRESH not collapse values of 1/2^{60} or perhaps
+  even smaller values e.g. 1/2^{128} to zero which would mean
+  ZEROBITTHRESH should be at least 60, or 128, ...
+
+
+Prepub review of GRCS paper (3-2017) and Code Release of GRCS code (7-26)
+-------------------------------------------------------------------------
+* We submitted a paper on "Matrix Operations via Recursion"
+  by Cuccaro, Daly, Gilbert and Zito (for Jen to give AACC talk)
+  see AACC_20170320 and it was approved.
+* We submitted the GRCS codebase (with the exception of the
+  GRCScontributers = LARCcontributers fil) to code review
+  GRCS_20170726 and it was deemed unclassified.  
+
+
+Produce matrices needed for FFT (Sept 2017)
+-------------------------------------------
+* Added the C,D,P, and F matrices needed to execute
+  the sparse block recursive version of the FFT from Van Loan.
+
+
+Added function to take trace norm (Aug 2017)
+--------------------------------------------
+
+
+Zeroize function added when reading stored matrices (June 2017)
+---------------------------------------------------
+* Started work on a function 
+  matrix_read_json_file_zeroize_small_scalars(path, theshold), 
+  which will read in a json file for a old saved matrix, but instead 
+  of storing that matrix in the matrix store, it will create a new matrix 
+  which is what you would get by replacing all small scalar values of the 
+  old matrix with zero.  In other words it replaces any scalar with zero
+  whose value is at most the threshold.	
+  BETA VERSION 
+   - currently this function doesn't work on COMPLEX ScalarType
+   - currently this function only works on matrices with all nonNegative values
+
+
+Alternative to cleaning (May - June 2017)
+-----------------------
+* we had realized a while back, that one alternative to cleaning
+  the matrix store was to store an intermediate result that was
+  a matrix by writing it out in compressed json format.
+  Then a second program could be run, with a newly formed matrix
+  store, which was completely clean, and the stored matrix could
+  be read into the new store.  This allowed many computational
+  advantages:
+   * the store is clear of everything but the basics and the one matrix
+   * computation can be done in stages, with an intermediate step saved
+     out, so you don't have to repeat the first portion of a computation
+     even if you want to try lots of different ways of finishing the 
+     computation.
+   * there is the possibility of manipulating the json formatted file
+     with the compressed stored matrix before or during reloading
+     into a store.  (See zeroize small scalars function below).
+
+
+Added a metadata store called the info_store (April - May 2017):
+--------------------------------------------
+*  Added capacity to store meta data on matrices in the
+   stored compressed format json files and to keep data
+   for a small number of important matrices inside this
+   info_store while running GRCS.  The data is stored in
+   pairs of strings - a string with the name of the type of
+   data e.g. "DATE", and a string with the associated value
+        e.g. "20170519"
+   There are examples of writing and reading the compressed
+   json files with meta data used in the directory
+   grcs/tests/python/test_infoStore1.py and test_infoStore2.py
+
+
+Experimented with different locations for ADJOINT operation (March 2017)
+-----------------------------------------------------------
+* We started to modify the ADJOINT to put it into the operations
+  store instead of putting it in a matrix record.  
+  This is not good code even though it functions.
+  TODO: ADJOINT works, but we have remnants of both methods in the code
+  that need to be cleaned up.
+
+
+Moved all the operations stores (SUM, PRODUCT,...) into single store (Mar 2017)
+-----------------------------------------------------------------------
+* In order to make efficient use of the hash table structure we
+  combined all the operation stores into a single hash table access.
+
+
+Added function to check to see if two json files are same matrix (Feb 2017):
+----------------------------------------------------------------
+* The function is equal_matrices_in_json_files in io.c
+
+
+Improved functionality of including grcs as a library (Jan 2017):
+-----------------------------------------------------
+* create libgrces along with libgrcs.so
+
+
+Continued improvements of test programs (Jan 2017):
+----------------------------------------------
+* Continued improvement on tests in grcs/tests directories and
+  added:    unittest python
+
+
+Test Program for Jupyter Notebook (Jan 2017)
+--------------------------------------------
+* Our first jupyter notebook example 
+  See grcs/tests/jupyter, and say
+  jupyter notebook cleaning.ipynb
+
+
+Cleaning Out Matrix Store and Operations Store (Nov 2016- Jan 2017):
+----------------------------------------------
+* We added various functions to make it easy to see what
+  was happening in hash chains when working from python interface,
+  For example, letting users get a hashID that would specifiy
+  a particular hash chain of interest, so they could print the
+  same chain after cleaning.  See routines:
+  hash_from_matrix_panel, hash_from_matrix_scalar,
+  matrix_hash_chain_info_to_file, matrix_hashID_from_serial,
+  hash_chain_info_to_screen, hash_from_matrix_serial,
+  worked histograms of lengths, ...
+  See grcs/tests/python/test_cleaning.py, 
+  See grcs/bin/exampleGRCS
+* We added and improved various cleaning routines for matrix store:
+  e.g. remove_matrix_from_mat_store, 
+  set_hold_matrix_from_serial (for user interface)
+* We added ability to clean the operations store and made it the
+  default that as you look up items in the operation store, that
+  any op_records that contain an erased input matrix are deleted.
+  And we added some basic cleaning routines to clean a single
+  op chain or the entire operations store:
+  e.g. clean_op_hash_chain_by_op_type 
+  See grcs/tests/python/test_cleaning.py, 
+  See example in ./bin/exampleGRCS.c which prints hash chains to 
+  file and cleans.
+
+Python and C User Interface by Serial Number (Nov 2016):
+--------------------------------------------
+* We modified exampleGRCS.c and python interfaces
+  to use serial numbers (MatrixIDs) and we only use
+  matrix pointers internally.
+  e.g. matrix_adjoint_serial, print_matrix_by_serial 
+  matrix_mult_serial,  matrix_add_serial, 
+  See grcs/tests/python/test_serial.py
+  See grcs/tests/python/test_math_serial.py, 
+  We removed confusing references to matrix pointers as IDs.
+* We created a table that will let you look up by serial
+  number whether or not a matrix still exists and if
+  it exists what its matrix pointer is.
+
+
+Terminology for Hashing Techniques Modified from Globbing (Nov 2016)
+---------------------------------------------------------
+* We played around with various terms and are not completely
+  happy, but have stopped using "globbing" and now use words
+  like "LocalHash", "neighborhood hash", "locality approximation",
+  "exemplar", "representative".
+
+
+Global objects replaced (Oct 2016):
+-----------------------
+* We reduced the number of global objects 
+  created in the initialization process
+
+
+ScalarTypes code improved (INTEGER, REAL, COMPLEX) (Sept 2016):
+--------------------------------------------------
+* We revised the python test suite to work for different scalarTypes 
+  see grcs/tests/python/test_matrixBuild.py etc.
+
+
