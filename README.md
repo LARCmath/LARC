@@ -27,16 +27,19 @@ has a Swig-generated Python interface.
 
 To get started, compile a fresh copy of the code in the 
 top-level project directory.
+
   make clean
   make
 
 To see examples of how the code works in C and to test
 functionality after modifications you can type
+
   bin/exampleLARC
 
 To see examples of how the code works in Python and to test
 whether code is functioning well you can type (from the
 top-level project directory):
+
   ./tests/python/test_matrixBuild.py
   ./tests/python/test_math.py
   ./tests/python/test_localHash.py
@@ -44,9 +47,11 @@ top-level project directory):
 
 It is currently the state that LARC has the ScalarType 
 determined by the following Makefile commands:  
+
   make TYPE=COMPLEX
   make TYPE=REAL
   make TYPE=INTEGER
+
 If no command is given the default is REAL (which is double).
 
 
