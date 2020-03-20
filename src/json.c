@@ -1,16 +1,57 @@
-//                          json.c 
-/*
- *
- * json.c
- * POC: Michael Schneider <maschn2@super.org>
- *
- * Copyright 2012, Institute for Defense Analyses
- * 4850 Mark Center Drive, Alexandria, VA; 703-845-2500
- * This material may be reproduced by or for the US Government
- * pursuant to the copyright license under the clauses at DFARS
- * 252.227-7013 and 252.227-7014.
- *
- */
+//                          json.c
+/******************************************************************
+ *                                                                *
+ * Copyright (C) 2014, Institute for Defense Analyses             *
+ * 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           *
+ * This material may be reproduced by or for the US Government    *
+ * pursuant to the copyright license under the clauses at DFARS   *
+ * 252.227-7013 and 252.227-7014.                                 *
+ *                                                                *
+ * LARC : Linear Algebra via Recursive Compression                *
+ * Authors:                                                       *
+ *   - Steve Cuccaro (IDA-CCS)                                    *
+ *   - John Daly (LPS)                                            *
+ *   - John Gilbert (UCSB, IDA adjunct)                           *
+ *   - Jenny Zito (IDA-CCS)                                       *
+ *                                                                *
+ * Additional contributors are listed in "LARCcontributors".      *
+ *                                                                *
+ * Questions: larc@super.org                                      *
+ *                                                                *
+ * All rights reserved.                                           *
+ *                                                                *
+ * Redistribution and use in source and binary forms, with or     *
+ * without modification, are permitted provided that the          *
+ * following conditions are met:                                  *
+ *   - Redistribution of source code must retain the above        *
+ *     copyright notice, this list of conditions and the          *
+ *     following disclaimer.                                      *
+ *   - Redistribution in binary form must reproduce the above     *
+ *     copyright notice, this list of conditions and the          *
+ *     following disclaimer in the documentation and/or other     *
+ *     materials provided with the distribution.                  *
+ *   - Neither the name of the copyright holder nor the names of  *
+ *     its contributors may be used to endorse or promote         *
+ *     products derived from this software without specific prior *
+ *     written permission.                                        *
+ *                                                                *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND         *
+ * CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,    *
+ * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF       *
+ * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE       *
+ * DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT HOLDER NOR        *
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,   *
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT   *
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;   *
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)       *
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN      *
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR   *
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, *
+ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.             *
+ *                                                                *
+ *****************************************************************/
+
+// Author: Michael Schneider
 
 #include "json.h"
 #include <stdio.h>
@@ -111,7 +152,7 @@ void j_throw(json_t *j, const char *format, ...) {
     if (root) while (root->parent) root = root->parent;
     if (root && root->longjmp_set) {
         if (root->longjmp_string) {
-            printf("WARNING! lost %s\n",msg2);
+            fprintf(stderr,"WARNING! lost %s\n",msg2);
             free(msg2);
         } else {
             root->longjmp_string = msg2;
@@ -119,7 +160,7 @@ void j_throw(json_t *j, const char *format, ...) {
         longjmp(root->longjmp_env, 1);
         j_error("longjmp returned?!");
     } else {
-        printf("(no exception handler) %s\n",msg2);
+        fprintf(stderr,"(no exception handler) %s\n",msg2);
         free(msg2);
         abort();
     }
@@ -395,11 +436,9 @@ json_t *_j_parse_file(FILE *fp, json_t *root) {
     if (end < 0) { perror("j_parse_file: ftell: "); return NULL; }
     rv = fseek(fp, 0, SEEK_SET);
     if (rv < 0) { perror("j_parse_file: fseek: "); return NULL; }
-    // printf("Hi Mom\n");
     // printf("  End is %ld\n",end);
     // char buf[end+1];
     char *buf = malloc(end+1);
-    // printf("Hi kids\n");
     size_t size = fread(buf,1,end+1,fp);
     j_check(size == end, "incomplete fread");
     //printf("j_parse_file read %ld bytes\n", size);

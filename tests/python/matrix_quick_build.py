@@ -1,32 +1,69 @@
-#################################################################
-#                                                               #
-# Copyright 2014, Institute for Defense Analyses                #
-# 4850 Mark Center Drive, Alexandria, VA; 703-845-2500          #
-# This material may be reproduced by or for the US Government   #
-# pursuant to the copyright license under the clauses at DFARS  #
-# 252.227-7013 and 252.227-7014.                                #
-#                                                               #
-# LARC : Linear Algebra via Recursive Compression               #
-# Authors:                                                      #
-#   - Steve Cuccaro (IDA-CCS)                                   #
-#   - John Daly (LPS)                                           #
-#   - John Gilbert (UCSB, IDA adjunct)                          #
-#   - Jenny Zito (IDA-CCS)                                      #
-#                                                               #
-# Additional contributors are listed in "LARCcontributors".     #
-#                                                               #
-# POC: Jennifer Zito <jszito@super.org>                         #
-# Please contact the POC before disseminating this code.        #
-#                                                               #
-#################################################################
+#!/usr/bin/env python3
+
+ ##################################################################
+ #                                                                #
+ # Copyright (C) 2014, Institute for Defense Analyses             #
+ # 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           #
+ # This material may be reproduced by or for the US Government    #
+ # pursuant to the copyright license under the clauses at DFARS   #
+ # 252.227-7013 and 252.227-7014.                                 #
+ #                                                                #
+ # LARC : Linear Algebra via Recursive Compression                #
+ # Authors:                                                       #
+ #   - Steve Cuccaro (IDA-CCS)                                    #
+ #   - John Daly (LPS)                                            #
+ #   - John Gilbert (UCSB, IDA adjunct)                           #
+ #   - Jenny Zito (IDA-CCS)                                       #
+ #                                                                #
+ # Additional contributors are listed in "LARCcontributors".      #
+ #                                                                #
+ # Questions: larc@super.org                                      #
+ #                                                                #
+ # All rights reserved.                                           #
+ #                                                                #
+ # Redistribution and use in source and binary forms, with or     #
+ # without modification, are permitted provided that the          #
+ # following conditions are met:                                  #
+ #   - Redistribution of source code must retain the above        #
+ #     copyright notice, this list of conditions and the          #
+ #     following disclaimer.                                      #
+ #   - Redistribution in binary form must reproduce the above     #
+ #     copyright notice, this list of conditions and the          #
+ #     following disclaimer in the documentation and/or other     #
+ #     materials provided with the distribution.                  #
+ #   - Neither the name of the copyright holder nor the names of  #
+ #     its contributors may be used to endorse or promote         #
+ #     products derived from this software without specific prior #
+ #     written permission.                                        #
+ #                                                                #
+ # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND         #
+ # CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,    #
+ # INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF       #
+ # MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE       #
+ # DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT HOLDER NOR        #
+ # CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,   #
+ # SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT   #
+ # NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;   #
+ # LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)       #
+ # HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN      #
+ # CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR   #
+ # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, #
+ # EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.             #
+ #                                                                #
+ ##################################################################
+
+from __future__ import print_function
 
 import os
 import sys
 import numpy as np
 import random
 sys.path.append(os.path.join(os.path.dirname(__file__),"../../src"))
-from pylarc import *
+import pylarc
 from ctypes import *
+
+# Define string for using in formating filenames
+scalarTypeStr = pylarc.cvar.scalarTypeStr
 
 def rand_real(range_start, range_stop):
     """
@@ -92,38 +129,47 @@ def matrix_random_matrixID(scalar_type, row_level, col_level, range_start, range
         randVals = [rand_f(range_start, range_stop) for i in range(n)]
     #convert list to a matrix and add to store
     try:
-        randMat_ID = row_major_list_to_store_matrixID(buildArray(randVals), row_level, col_level, 2**col_level)
+        randMat_ID = row_major_list_to_store_matrixID(pylarc.map_to_str(randVals, scalarTypeStr), row_level, col_level, 2**col_level)
     except TypeError:
         raise TypeError("argument 1 of type 'ScalarType'")
 
     #return matrix id
     return randMat_ID
 
-def matrix_zero_matrixID(row_level, col_level):
-    """
-    Builds the zero matrix of the requested size.
-    """
-    n = (2**row_level)*(2**col_level)
-    vals = [0 for i in range(n)]
+## If you want a zero matrix, there is a routine in matrix_store.c for that
+## int64_t get_zero_matrixID(mat_level_t row_level, mat_level_t col_level);
+## Don't use the old code from Andy for matrix_zero_matrixID.
 
-    try: 
-        zeroMat_ID = row_major_list_to_store_matrixID(buildArray(vals), row_level, col_level, 2**col_level)
-    except TypeError:
-        raise TypeError("argument 1 of type `ScalarType'")
+# def matrix_zero_matrixID(row_level, col_level):
+#     """
+#     Builds the zero matrix of the requested size and returns the matrixID.
+#     """
+#     n = (2**row_level)*(2**col_level)
+#     vals = [0 for i in range(n)]
 
-    return zeroMat_ID
+#     try: 
+#         zeroMat_ID = row_major_list_to_store_matrixID(pylarc.map_to_str(vals, scalarTypeStr), row_level, col_level, 2**col_level)
+#     except TypeError:
+#         raise TypeError("argument 1 of type `ScalarType'")
 
-def matrix_identity_matrixID(level):
-    """
-    Builds a square identity matrix of requested level.
-    """
-    n = (2**level)*(2**level)
-    vals = [1*(0==(i%(2**level+1))) for i in range(n)]
+#     return zeroMat_ID
 
-    try:
-        idMat_ID = row_major_list_to_store_matrixID(buildArray(vals), level, level, 2**level)
-    except TypeError:
-        raise TypeError("argument 1 of type 'ScalarType'")
 
-    return idMat_ID
+## If you want an identity  matrix, there is a routine in matrix_store.c for that
+## int64_t get_identity_matrixID(mat_level_t level);
+## Don't use the old code from Andy for matrix_identity_matrixID.
+
+# def matrix_identity_matrixID(level):
+#     """
+#     Builds a square identity matrix of requested level and returns the matrixID.
+#     """
+#     n = (2**level)*(2**level)
+#     vals = [1*(0==(i%(2**level+1))) for i in range(n)]
+
+#     try:
+#         idMat_ID = row_major_list_to_store_matrixID(pylarc.map_to_str(vals, scalarTypeStr), level, level, 2**level)
+#     except TypeError:
+#         raise TypeError("argument 1 of type 'ScalarType'")
+
+#     return idMat_ID
 

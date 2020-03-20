@@ -1,0 +1,452 @@
+//                   LARCimprovements
+/******************************************************************
+ *                                                                *
+ * Copyright (C) 2014, Institute for Defense Analyses             *
+ * 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           *
+ * This material may be reproduced by or for the US Government    *
+ * pursuant to the copyright license under the clauses at DFARS   *
+ * 252.227-7013 and 252.227-7014.                                 *
+ *                                                                *
+ * LARC : Linear Algebra via Recursive Compression                *
+ * Authors:                                                       *
+ *   - Steve Cuccaro (IDA-CCS)                                    *
+ *   - John Daly (LPS)                                            *
+ *   - John Gilbert (UCSB, IDA adjunct)                           *
+ *   - Mark Pleszkoch (IDA-CCS)
+ *   - Jenny Zito (IDA-CCS)                                       *
+ *                                                                *
+ * Additional contributors are listed in "LARCcontributors".      *
+ *                                                                *
+ * Questions: larc@super.org                                      *
+ *                                                                *
+ * All rights reserved.                                           *
+ *                                                                *
+ * Redistribution and use in source and binary forms, with or     *
+ * without modification, are permitted provided that the          *
+ * following conditions are met:                                  *
+ *   - Redistribution of source code must retain the above        *
+ *     copyright notice, this list of conditions and the          *
+ *     following disclaimer.                                      *
+ *   - Redistribution in binary form must reproduce the above     *
+ *     copyright notice, this list of conditions and the          *
+ *     following disclaimer in the documentation and/or other     *
+ *     materials provided with the distribution.                  *
+ *   - Neither the name of the copyright holder nor the names of  *
+ *     its contributors may be used to endorse or promote         *
+ *     products derived from this software without specific prior *
+ *     written permission.                                        *
+ *                                                                *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND         *
+ * CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,    *
+ * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF       *
+ * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE       *
+ * DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT HOLDER NOR        *
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,   *
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT   *
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;   *
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)       *
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN      *
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR   *
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, *
+ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.             *
+ *                                                                *
+ *****************************************************************/
+
+This file describes the major changes in LARC from Oct 2017 to Mar 2020.
+=======================================================================
+(See LARCimprovements.Updated20171006 for period Aug 2016 - Oct 2, 2017)
+
+
+Summary of new features in the latest release:
+
+* the new BSD copyright notice/software license 
+* multiprecision scalarTypes: MPinteger, MPrational, and
+   a complex rational scalarType built up from MPrational;
+   also MPReal (multiprecision floating point) and a complex floating point
+   built from MPreal,
+* a new json file format in which scalars are strings in order
+   to accommodate multiprecision,
+* a python routine (util/canonical_format_json.py) is supplied
+   to convert old-style json to new-style string-based json format,
+   and/or to convert a json file to one with smaller-valued matrixIDs.
+* the ability to write your own recursive functions that
+   will be memoized in the operations store
+* more examples of how to use the python wrapper
+   capability to write LARC applications, including some
+   examples of how to use json files for storing intermediate
+   results or use cleaning functions to remove stored matrices.
+* some norms: maxnorm (largest absolute value of a scalar
+   in the matrix), trace norm (trace(A^{\dagger}A),
+   maxnorm_custom_norm, which replaces the absolute value
+   function with a user-defined norm function or
+   if norm is not defined returns the largest value in
+   the matrix (or 0 if the matrix is all negative).
+* Boolean matrix operations AND and OR, and
+   a Boolean matrix product composed of these.
+* simple reversible logic such as the matrices for
+   carrying out a NOT, CNOT, and CCNOT
+* unittests that can be run for each scalarType and
+   can be conveniently tested for all types by "make unittests"
+* python utility to check whether two json files represent
+   the same matrix (larc/utils/mat_compare.py)
+* python utilities to help with LARC complexity analysis by creating
+   random matrices or random Boolean matrices.
+* python utility to count the number of times a particular
+   scalar appears in a matrix.
+* Python 3 compatibility 
+* added extensive doxygen comments to C code
+* changed Real type from C double to long double, and Complex type from
+  C complex to long double complex
+* change to naive print to enforce reasonable limits on size, look better on
+  screen
+* added scalar square root and division functions, implemented L2 matrix norm
+
+Details by date ...
+
+Release version 1.0 for Spring 2020
+-----------------------------------
+This release contains the BSD copyright notice and software license.
+The scalarTypes now include multiprecision for GMP: the integer and
+rational types native to GMP, and our own version of complex rational
+using GMP rational. In addition, the code has been restructured so that
+scalarTypes can be added by simply defining a series of routines in
+scalars.c/h and updating larc.h with the name and type of the new scalarType.
+
+Added function to determine available memory (Mar 2020)
+-------------------------------------------------------
+This function is intended to help the user determine what sizes should be set 
+for the matrixStore and OperationsStore.
+
+Added routine which finds the number of records in a LarcMatrix file (Feb 2020)
+-------------------------------------------------------------------------------
+
+Modified naive print to be more readable, set reasonable limits (Feb 2020)
+-------------------------------------------------------------------------
+Printing to screen now determines the size of the window to which the matrix
+will be printed (using the curses library) and formats the data to be more
+readable given that window size. It also checks the size of the matrix to be
+printed and balks at larger sizes. (However, print-to-file can be used with
+'stdout' as input filename to circumvent these limits.)
+
+Added scalar square root function, L2 matrix norm (Feb 2020)
+------------------------------------------------------------
+
+Renamed 30 LARC functions (Feb 2020)
+------------------------------------
+The new names more accurately indicate the data type of the input and output.
+Since we refer to data by value (now a C string), by pointer, and by matrixID,
+the new names indicate which function should be used for which input and output
+data type.
+
+Increased precision of C types (Feb 2020)
+-----------------------------------------
+Type Real was C double and is now C long double; Type Complex was C complex
+and is now C long double complex.
+
+Replaced function to retrieve matrixID of scalar in (i,j) position (Jan 2020)
+-----------------------------------------------------------------------------
+We found a more efficient algorithm to do the same thing. Along with this 
+change, we removed the file matrix_accessor.c and divided its routines between
+io.c and matrix_store.c, depending on functionality.
+
+Extensive doxygen comments added to C code (Nov 2019 - Jan 2020)
+----------------------------------------------------------------
+
+Began work to add Matrix Market Exchange I/O capability (Nov 2019 - ?)
+----------------------------------------------------------------------
+
+Added new multiprecision types for floating point real and complex
+        (Nov 2019 - Jan 2020)
+------------------------------------------------------------------
+So that the new complex type could have the more natural name MPComplex,
+the old MPComplex type was renamed to MPRatComplex. The real type is
+called MPReal.
+
+Added functions for saxpy and vector dot product (Nov 2019)
+-----------------------------------------------------------
+
+Added memoized function for unitary basis change (Oct 2019)
+-----------------------------------------------------------
+The function calculates B*A*adjoint(B). If B is unitary, the result is a 
+change in basis. The function allows a more general B matrix to be used.
+
+Python code made compatible with Python 3 (Sep 2019)
+----------------------------------------------------
+
+Reorganized python code to allow single import statement (Jul-Sep 2019)
+-----------------------------------------------------------------------
+
+Added new multiprecision type MPComplex (Jun-Jul 2019)
+------------------------------------------------------
+This type is a C structure of two MPRationals.
+
+Made changes to accomodate SWIG version 3.0.12 (Jun 2019)
+---------------------------------------------------------
+
+Changed copyright notice to use BSD form (May 2019)
+---------------------------------------------------
+
+Added function to retrieve matrixID of scalar in (i,j) position (Oct 2018)
+--------------------------------------------------------------------------
+
+Defined global scratch variables to be used for temporary scalars (Aug 2018)
+----------------------------------------------------------------------------
+Once we started using GMP multiprecision, we needed temporary scalars
+inside many routines, and these required us to use allocate and free
+the space.  In order to minimize the significant overhead for this, we
+decided to create a structure scratchVars_s (of type scratchVars_t).
+The definition for this structure is found in global.h, it contains
+several global scratch variables (e.g. "submit_to_store" which is
+intended to eventually be put into the store, and "quick_use" which is
+a temporary scalar).  The current version of code instantiates this
+structure only once, but uses the structure in multiple routines. This
+is not currently thread safe.  If you are writing a recursive
+function, as with all global variables you must be careful that the
+scratch scalar is no longer being used when the recursive call is
+made.
+
+
+Added Python utilities in utils directory with command line interface (Aug 2018)
+--------------------------------------------------------------------------------
+    mat_build.py            builds a small random matrix and writes to json
+    mat_buildRandBool.py    builds a random boolean matrix and writes to json
+    mat_compare.py          reports if json files represent the same matrix
+    mat_count.py            counts appearances of a scalar in a json matrix
+    mat_count_rec.py        counts appearances of a scalar in a json matrix
+    mat_inout.py            resets matrixIDs - also converts legacy json files
+    mat_locate.py           locates appearances of a scalar in a json matrix
+    mat_print.py            prints a json matrix to screen
+
+
+Added more examples in exampleLARC.c including multiprecision (Aug 2018)
+------------------------------------------------------------------------
+Wrote new exampleLARC.c file that introduces user to some of the many 
+capabilities of LARC with examples and tutorials.
+
+
+Modified the json file handling to make multiprecision work (Aug 2018)
+----------------------------------------------------------------------
+* Added functions: empty1, matrix_read_and_alter_scalars_json_file,
+  matrix_list_scalars_json, matrix_get_scalars_json.
+* Added functions:
+  matrix_write_and_alter_scalars_json_file
+
+
+Increased precision of math in python routines (Aug 2018)
+---------------------------------------------------------
+
+
+Converted more python routines to use scalars in string format (Aug 2018)
+-------------------------------------------------------------------------
+
+
+Improved I/O for REAL and COMPLEX scalarTypes (Aug 2018)
+--------------------------------------------------------
+
+
+Expanded and Repaired Unit Testing and Added Makefile functionality (Aug 2018)
+------------------------------------------------------------------------------
+* added unit testing for approximation of scalars for REAL and COMPLEX.
+* added make command for unittesting.
+* extended Python Unittesting for routines from: scalars.c, matmath.c,
+  op_store.c, and matrix_store.c. These can be called from the top
+  directory of larc by calling tests/python/run_unittests.py
+  (if new unittest files are added, please include them in this file).
+  These can also be called from the top directory of larc by running
+  python2.7 -m unittest discover -p 'test_unittest*.py' -s
+  tests/python -v which automatically discovers unittest files with
+  names of the form test_unittest*.py Also, added a target in the
+  makefile to run the unittests for each make type and save the
+  results in a file called test_output. To do this, run make unittests
+  from the top directory of larc.
+
+
+Improved utilities (Aug 2018)
+-----------------------------
+* replaced LARC initialization with new python module called larc_initer.
+  Also modified and replaced default sizes of the operation store and
+  matrix store to fit the application Andy was working on (might want
+  to print comment to user in verbose version.)
+
+
+Developed Boolean routines (July 2018)
+--------------------------------------
+* although we do not yet define a scalarType BOOLEAN, we added efficient
+  Boolean versions analogous to functions sca_cmp, sca_add, sca_mult, sca_set,
+  and sca_set_str, with "bool" prefix, bool_cmp, bool_add, bool_mult, bool_set,
+  and bool_set_str, that are defined when using scalarType INTEGER or MPINTEGER.
+* added verbose argument to init_boolean_ops and init_arithmetic_ops
+* added routines to generate random Boolean matrices recursively 
+
+
+Added capability to use GMP rational and integer as scalarType (Mar-July 2018)
+------------------------------------------------------------------------------
+* we added two new GMP scalarTypes: MPINTEGER, MPRATIONAL using GMP 6.1.2
+  for GMP rational (mpz_t) and GMP rational (mpq_t)
+* added some example GMP routines to demonstrate GMP interacting with SWIG.
+* Restructured code to make scalarType and scalar operations a modular
+  feature. New scalarTypes are now added by simply defining a series
+  of routines in scalars.c/h (and updating larc.h with the name and
+  type of the new scalarType). Users can define their own scalar
+  operations on the fly and switch them out, if they want to.  These
+  initializations are named sca_*.  Then added scalar routine
+  prototypes to larc.h that need to be initialized before preloading
+  the matrix store: sca_init, sca_cmp, sca_add, etc.
+* created scalar routines for new types and added appropriate capabilities
+  to old routines (e.g. math routines: add, mult, etc. and
+  recursive python utilities like count_zero_entries_json, and count_entries).
+* developed testing for new scalarTypes
+* added note to README about scalarTypes
+
+
+Added python routines to produce cirulant and Toeplitz matrices (June 2018)
+---------------------------------------------------------------------------
+
+
+Replaced routines to count zeros with those to count specified scalar (Jun 2018)
+--------------------------------------------------------------------------------
+* modified python utilities which had called routines such as
+  count_zero_entries_json, to instead call routines which
+  count the number of an arbitrary specified scalar entry 
+  e.g. count_entries_json
+* if no scalar is supplied, the routine defaults to counting zeroes.
+
+Removed entry for matrix adjoint from matrix record (Jun 2018)
+-----------------------------------------------------~~-------
+* Since matrix adjoint is in matrix store, and not all applications
+  use it, we shortened the matrix record by deleting it from there.
+
+
+Added Empty Op Store Routine (May 2018)
+---------------------------------------
+* added empty_op_store routine (alternative to cleaning)
+
+
+Command line utilities for json files (May 2018)
+------------------------------------------------
+
+
+Fixed matrix_accessor routine problem (May 2018)
+------------------------------------------------
+* converted mat_level_t to int64_t where needed
+  in matrix_accessor routines
+
+
+Added op_store cleaning routine (May 2018)
+------------------------------------------
+
+
+Fixed Issue that 1 is 32-bit integer vs 64 bit 1L (May 2018)
+------------------------------------------------------------
+* store.size calculation is now 1L shifted instead of 1 shifted
+
+
+Variable name change (Apr 2018)
+-------------------------------
+* changed mat_add_t, op_add_t, and info_add_t to *_ptr_t
+(_add_ stood for address but could be confused with addition)
+
+
+Improved python unit testing and routine error checking (Mar-May 2018)
+----------------------------------------------------------------------
+
+
+New LARC functionality (Mar 2018)
+---------------------------------
+* Added LARC operations:
+     - ZEROCOUNT which counts the number of scalars in a matrix which are 0
+     - MATRIX_OR which is equivalent to logical OR 
+     - BINARY_PROD which is equivalent to logical AND
+
+
+Allow creation of vectors using panels (Mar 2018)
+-------------------------------------------------
+* edited matrix_get_*_from_panel routines to allow creation of row
+  vectors and column vectors from panels. Also rewrote some of their
+  validity checks.
+
+
+Generic functions added to OP store (Mar-July 2018)
+---------------------------------------------------
+* Added generic functions to OP store for user
+  defined recursive functions
+* Extended these to be available with multiprecision types  
+
+
+Notifications from Makefile for scalarType (Mar 2018)
+-----------------------------------------------------
+* modified Makefile to print message telling user what type was
+  specified (or if not specified or improperly specified, that the
+  default REAL type was used)
+
+
+MatrixID wrappers for routines (Mar 2018)
+---------------------------------------------
+* added matrixID wrappers for accessing matrix row level
+  and matrix col level.
+* added a matrixID wrapper for accessing submatrices
+
+
+Test file clarifications (Mar 2018)
+-----------------------------------
+* re-defined gate functions in terms of NAND in testing files.
+
+
+Updated list of Contributors (Feb 2018)
+---------------------------------------
+* in LARCcontributors and slide deck and doc.h
+
+
+Added More Recursive Functions and Unit Testing (Feb 2018)
+------------------------------------------------------
+* added LARC operations for difference of matrices,
+* added maxnorm of a  matrix,
+* added sparsity of a matrix.
+
+
+Integrated some of Matt Calef work into LARC (Jan-Feb 2018)
+-------------------------------------------------------
+*  Integrated some of Matt Calef's changes:
+    inline functions made static,
+    tests/C directory added,
+    some Doxygen markup, untested (by us)
+    CMake functionality
+    additional preliminary C++ stuff;
+    added matrix accessor functions
+
+Hash Statistics and Improved Hash Function (Oct-Dec 2017)
+---------------------------------------------------------
+* We noticed when doing a large problem in an applications
+  package that our hash table was slightly unbalanced which
+  had a significant effect on this very large problem.
+  We did some testing and added various tests to determine
+  whether the hash table was like a random function, see:
+       tests/python/test_hashstats.py
+       tests/jupyter/hashstats.ipynb
+       tests/jupyter/empty_bins.ipynb
+            which calculates the expected number of empty bins
+	    in a hash theoretically or by monte carlo
+       tests/jupyter/hashstats2.ipynb
+    Jenny created a new hash function recursive_hash_of_four_integers
+    that recursively utilizes the multiplicative hash following
+    Cormen etal and Knuth.  This function looked like a random
+    function in as far as we could test and greatly improved the
+    performance of our application.
+    We added the capability to put statistics on the hash in the
+    periodic reporting, such as the length of longest hash chain
+    (when HASHSTATS is defined) but the default is to leave it undefined.
+
+
+Precision Testing and FFT expansion (Oct 2017)
+---------------------------------------------
+* see tests/python/test_precision.py
+* FFT now includes routine to return the principal 2^n-th root of unity
+
+
+Kronecker Product fixes and tests (Oct 2017)
+--------------------------------------------
+
+
+
+
+

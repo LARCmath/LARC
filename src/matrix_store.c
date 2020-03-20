@@ -1,7 +1,7 @@
 //                       matrix_store.c 
 /******************************************************************
  *                                                                *
- * Copyright 2014, Institute for Defense Analyses                 *
+ * Copyright (C) 2014, Institute for Defense Analyses             *
  * 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           *
  * This material may be reproduced by or for the US Government    *
  * pursuant to the copyright license under the clauses at DFARS   *
@@ -16,8 +16,38 @@
  *                                                                *
  * Additional contributors are listed in "LARCcontributors".      *
  *                                                                *
- * POC: Jennifer Zito <jszito@super.org>                          *
- * Please contact the POC before disseminating this code.         *
+ * Questions: larc@super.org                                      *
+ *                                                                *
+ * All rights reserved.                                           *
+ *                                                                *
+ * Redistribution and use in source and binary forms, with or     *
+ * without modification, are permitted provided that the          *
+ * following conditions are met:                                  *
+ *   - Redistribution of source code must retain the above        *
+ *     copyright notice, this list of conditions and the          *
+ *     following disclaimer.                                      *
+ *   - Redistribution in binary form must reproduce the above     *
+ *     copyright notice, this list of conditions and the          *
+ *     following disclaimer in the documentation and/or other     *
+ *     materials provided with the distribution.                  *
+ *   - Neither the name of the copyright holder nor the names of  *
+ *     its contributors may be used to endorse or promote         *
+ *     products derived from this software without specific prior *
+ *     written permission.                                        *
+ *                                                                *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND         *
+ * CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,    *
+ * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF       *
+ * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE       *
+ * DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT HOLDER NOR        *
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,   *
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT   *
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;   *
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)       *
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN      *
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR   *
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, *
+ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.             *
  *                                                                *
  *****************************************************************/
 
@@ -35,6 +65,7 @@
 #include "hash.h"
 #include "op_store.h"
 #include "json.h"
+#include "larc.h"
 #include "global.h"
 
 // we will have a table of tables of this size, mat_ptr_table_list
@@ -64,19 +95,55 @@ static struct matrix_store_t {
                          // when rounded to sighash significant bits
   double zerorealthresh; // locality-approximation  parameter: equate to zero 
                          //when smaller than zerorealthresh
-  mat_add_t **zero;     // doubly indexed matrix IDs for the preloaded zero matrices
-  mat_add_t *identity;  // array of matrix IDs for the preloaded identity matrices (square)
-  mat_add_t *iHadamard; // array of matrix IDs for the preloaded integer Hadamard matrices
+  mat_ptr_t **zero;     // doubly indexed matrix IDs for the preloaded zero matrices
+  mat_ptr_t *identity;  // array of matrix IDs for the preloaded identity matrices (square)
+  mat_ptr_t *iHadamard; // array of matrix IDs for the preloaded integer Hadamard matrices
 
   // POSSIBLY CAN BE REMOVED                      
   uint32_t deepest;    // longest successful traversal down a hash chain to retrieve a matrix 
 
   // this is a list of tables each entry of each table contains a pointer to a matrix record
   // the index into the table is the matrixID, broken into lower and higher bits
-  mat_add_t **mat_ptr_table_list;
+  mat_ptr_t **mat_ptr_table_list;
 
 } store = {0};   // this creates the variable "store" which is a struct of type matrix_store_t
 
+
+// former inline functions - were in matrix_store.h
+
+int matrix_is_zero_matrixID(int64_t mat_mID) {
+  mat_ptr_t mat_mPTR = get_matPTR_from_matID(mat_mID, "", __func__, 0);
+  return(matrix_is_zero(mat_mPTR));
+}
+
+int matrix_is_invalid_matrixID(int64_t mat_mID) {
+  mat_ptr_t mat_mPTR = get_matPTR_from_matID(mat_mID, "", __func__, 0);
+  return(matrix_is_invalid(mat_mPTR));
+}
+
+// matrixID versions of MACRO FUNCTIONS
+mat_level_t matrix_row_level_matrixID(int64_t mat_mID)
+{
+    mat_ptr_t mat_ptr = get_matPTR_from_matID(mat_mID, "", __func__, 0);
+    return matrix_row_level(mat_ptr);
+}
+mat_level_t matrix_col_level_matrixID(int64_t mat_mID)
+{
+    mat_ptr_t mat_ptr = get_matPTR_from_matID(mat_mID, "", __func__, 0);
+    return matrix_col_level(mat_ptr);
+}
+int64_t matrix_sub_matrixID(int64_t mat_mID, int s)
+{
+    mat_ptr_t mat_ptr = get_matPTR_from_matID(mat_mID, "", __func__, 0);
+    mat_ptr_t sub_mat_ptr = matrix_sub(mat_ptr, s);
+    return get_matID_from_matPTR(sub_mat_ptr);
+}
+
+char *matrix_trace_matrixID(int64_t m_ID)
+{
+  mat_ptr_t m_ptr = get_matPTR_from_matID(m_ID, "", __func__, 0);
+  return sca_get_str(matrix_trace(m_ptr));
+}
 
 mat_level_t maximum_level(void) {
   return store.largest_level;
@@ -103,6 +170,19 @@ uint64_t num_matrices_in_store ( void )
   return num_matrices;
 }
  
+mat_level_t matrix_pair_max_level(mat_ptr_t A_ptr, mat_ptr_t B_ptr)
+{
+    mat_level_t max_level = 0;
+    if (A_ptr != NULL){
+        max_level = (matrix_row_level(A_ptr) > max_level) ? matrix_col_level(A_ptr) : max_level;
+        max_level = (matrix_col_level(A_ptr) > max_level) ? matrix_col_level(A_ptr) : max_level;
+    }
+    if (B_ptr != NULL){
+        max_level = (matrix_row_level(B_ptr) > max_level) ? matrix_col_level(B_ptr) : max_level;
+        max_level = (matrix_col_level(B_ptr) > max_level) ? matrix_col_level(B_ptr) : max_level;
+    }
+    return max_level;
+}
 
 void
 matrix_store_report(char *outfilepath)
@@ -147,8 +227,8 @@ matrix_store_report(char *outfilepath)
 	
 	// Also print memory used by matrix pointer table
         // The high order bits of matrixID_next give the table index
-	uint64_t bytes_ptr_list = SIZE_MPT * sizeof(mat_add_t);   	   			// size of array of pointers to tables
-	uint64_t bytes_per_table = SIZE_MPT * sizeof(mat_add_t);  	   			// size of each table
+	uint64_t bytes_ptr_list = SIZE_MPT * sizeof(mat_ptr_t);   	   			// size of array of pointers to tables
+	uint64_t bytes_per_table = SIZE_MPT * sizeof(mat_ptr_t);  	   			// size of each table
         uint64_t num_tables = ((store.matrixID_next - 1) >> LOG_SIZE_MPT) + 1;    //since indexing starts at 0
 	uint64_t bytes_ptr_total = bytes_ptr_list + (num_tables * bytes_per_table);
 	fprintf(f, "Memory used by matrix pointer table: \n");
@@ -189,20 +269,20 @@ create_matrix_store(size_t exponent, mat_level_t max_level, int sighash, int zer
     }
  
   // two dimensional array of zeros and one dimensional arrays of identities and iHadamards
-  store.zero = (mat_add_t **)malloc((1 + max_level) * sizeof(mat_add_t *));
-  store.identity = (mat_add_t *)malloc((1 + max_level) * sizeof(mat_add_t));
+  store.zero = (mat_ptr_t **)malloc((1 + max_level) * sizeof(mat_ptr_t *));
+  store.identity = (mat_ptr_t *)malloc((1 + max_level) * sizeof(mat_ptr_t));
   if ((store.zero == NULL) || (store.identity == NULL)) {
     ALLOCFAIL();
     exit(1);    
   }
   for (int i= 0; i <= max_level; ++i) {
-    store.zero[i] = (mat_add_t *)malloc((1 + max_level) * sizeof(mat_add_t ));
+    store.zero[i] = (mat_ptr_t *)malloc((1 + max_level) * sizeof(mat_ptr_t ));
     if (store.zero[i] == NULL) {
       ALLOCFAIL();
       exit(1);
     }
   }
-  store.iHadamard = (mat_add_t *)malloc((1 + max_level) * sizeof(mat_add_t));
+  store.iHadamard = (mat_ptr_t *)malloc((1 + max_level) * sizeof(mat_ptr_t));
   if (store.iHadamard == NULL) {
     ALLOCFAIL();
     exit(1);
@@ -234,8 +314,8 @@ create_matrix_store(size_t exponent, mat_level_t max_level, int sighash, int zer
   // and initialize the first table in this list 
   // with zeros corresponding to mat_ptr MATRIX_PTR_INVALID
   // ToDo: may want to have 2 sizes: one for the number of tables, and one for the table size
-  store.mat_ptr_table_list = (mat_add_t **)calloc(SIZE_MPT,sizeof(mat_add_t *));  //list of ptrs to tables
-  store.mat_ptr_table_list[0] = (mat_add_t *)calloc(SIZE_MPT,sizeof(mat_add_t));  //the first table
+  store.mat_ptr_table_list = (mat_ptr_t **)calloc(SIZE_MPT,sizeof(mat_ptr_t *));  //list of ptrs to tables
+  store.mat_ptr_table_list[0] = (mat_ptr_t *)calloc(SIZE_MPT,sizeof(mat_ptr_t));  //the first table
 
   return 1;
 }
@@ -253,15 +333,18 @@ create_matrix_store(size_t exponent, mat_level_t max_level, int sighash, int zer
  *        release_hold_matrix to remove the hold.           *
  *                                                          *
  ***********************************************************/
-int lock_matrix(mat_add_t m_ptr) {
+int lock_matrix(mat_ptr_t m_ptr) {
   if (m_ptr == MATRIX_PTR_INVALID) {
-    printf ("ERROR: in lock_matrix, matrix does not exist!\n");
+    fprintf (stderr,"ERROR: in lock_matrix, matrix does not exist!\n");
     return (0);
   }
 
   if (m_ptr->lock == 1) {
-    printf ("WARN: in lock_matrix, attempt lock_matrix for matrix already locked\n");
-    return (1);
+    if (VERBOSE>DEBUG) {
+      fprintf(stderr,"NOTE: in lock_matrix, attempt to lock already-locked matrix\n");
+      fprintf(stderr,"assuming that any submatrices are also locked...\n");
+    }
+    return(1);
   }
 
   m_ptr->lock = 1;
@@ -286,7 +369,7 @@ int lock_matrix(mat_add_t m_ptr) {
  ***********************************************************/
 int set_hold_matrix_from_matrixID(int64_t m_mID) {
   // get the matrix pointers from the matrixID, and see if still in store 
-  mat_add_t m_ptr = mat_ptr_from_matrixID(m_mID, "first", __func__,0);
+  mat_ptr_t m_ptr = get_matPTR_from_matID(m_mID, "", __func__,0);
   return set_hold_matrix(m_ptr);
 }
 
@@ -303,14 +386,18 @@ int set_hold_matrix_from_matrixID(int64_t m_mID) {
  *  A lock should never be removed, a hold can be.          *
  *                                                          *
  ***********************************************************/
-int set_hold_matrix(mat_add_t m_ptr) {
+int set_hold_matrix(mat_ptr_t m_ptr) {
   if (m_ptr == MATRIX_PTR_INVALID) {
-    printf ("ERROR: in set_hold_matrix, matrix does not exist!\n");
+    fprintf (stderr,"ERROR: in set_hold_matrix, matrix does not exist!\n");
     return (0);
   }
+  if (m_ptr->lock) {
+    if (VERBOSE>BASIC)
+      fprintf (stderr,"NOTE: no need to hold a locked matrix.\n");
+    return(1);
+  }
 
-  ++m_ptr->hold;
-  
+  ++(m_ptr->hold);
   return (1);
 }   
 
@@ -322,31 +409,36 @@ int set_hold_matrix(mat_add_t m_ptr) {
  ************************************************************/
 int release_hold_matrix_from_matrixID(int64_t m_mID) {
   // get the matrix pointers from the matrixID, and see if still in store 
-  mat_add_t m_ptr = mat_ptr_from_matrixID(m_mID, "first", __func__,0);
+  mat_ptr_t m_ptr = get_matPTR_from_matID(m_mID, "", __func__,0);
   return release_hold_matrix(m_ptr);
 }
-
-
-
 
 /****************************************************************
  *                  release_hold_matrix                         *
  *  See explanation above for set_hold_matrix and lock_matrix.  *
  *                                                              *
  ****************************************************************/
-int release_hold_matrix(mat_add_t m_ptr) {
+int release_hold_matrix(mat_ptr_t m_ptr) {
+
   if (m_ptr == MATRIX_PTR_INVALID) {
-    printf ("ERROR: in release_hold_matrix, matrix does not exist!\n");
+    fprintf (stderr,"ERROR: in release_hold_matrix, matrix does not exist!\n");
     return (0);
   }
 
-  if (m_ptr->hold == 0) {
-    printf ("WARN: attempt release_hold_matrix for matrix with no holds\n");
+  if (m_ptr->lock) {
+    if (VERBOSE>BASIC)
+      fprintf (stderr,"NOTE: no holds needed on locked matrices\n");
     return (1);
   }
 
-  --m_ptr->hold;
-  
+  if (m_ptr->hold == 0) {
+    if (VERBOSE>SILENT) 
+      fprintf (stderr,"WARN: attempt release_hold_matrix for matrix with no holds\n");
+    return (1);
+  }
+
+  --(m_ptr->hold);
+
   return (1);
 }   
 
@@ -362,10 +454,6 @@ int release_hold_matrix(mat_add_t m_ptr) {
 int preload_matrix_store(void) {
 
   int verbose = 0;
-  if (verbose) {
-    printf("Inside routine %s with:\n", __func__);
-    printf("   about to run init_globals\n");
-  }
  
   int top_level = store.largest_level;
   if (verbose) {
@@ -374,29 +462,43 @@ int preload_matrix_store(void) {
   }
   
   // panels of sub matrices  
-  mat_add_t sm[4];
+  mat_ptr_t sm[4];
   
   // 0, 1, -1 are constants needed for preload of zero, identity, integer Hadamard
-  ScalarType scalar0;
-  ScalarType scalar1;
-  ScalarType scalarM1;
+  // NOTE: scalar ops must be instantiated before preloading matrix store!
+  scalarType scalar0;
+  scalarType scalar1;
+  scalarType scalarM1;
+  sca_init(&scalar0);
+  sca_init(&scalar1);
+  sca_init(&scalarM1);
 
-#ifndef USE_COMPLEX //REAL OR INTEGER
-  scalar0 = 0;
-  scalar1 = 1;
-  scalarM1 = -1;  
-#else   // COMPLEX
-  scalar0 = 0 + 0*I;
-  scalar1 = 1 + 0*I;
-  scalarM1 = -1 + 0*I;
-#endif 
+  sca_set_str(&scalar0, "0");
+  sca_set_str(&scalar1, "1");
+  sca_set_str(&scalarM1, "-1");
+  if (verbose) {
+    printf("Inside routine preload_matrix_store with:\n");
+    char *scalar0_string = sca_get_str(scalar0);
+    char *scalar1_string = sca_get_str(scalar1);
+    char *scalarM1_string = sca_get_str(scalarM1);
+    printf("loaded %s, %s, %s.\n", scalar0_string, scalar1_string, scalarM1_string);
+    free(scalarM1_string);
+    free(scalar1_string);
+    free(scalar0_string);
+  }
+  
 
   // LOAD ALL THE ZERO MATRICES
-  store.zero[0][0] = matrix_get_ptr_scalar(scalar0);
+  store.zero[0][0] = get_valMatPTR_from_val(scalar0);
   if (!lock_matrix(store.zero[0][0])) {
-      printf("FAIL: scalar zero preload tried to lock a matrix which does not exist\n");
+      fprintf(stderr,"FAIL: scalar zero preload tried to lock a matrix which does not exist\n");
       exit(1);
     }
+  if (verbose) {
+    printf("Inside routine preload_matrix_store:\n");
+    printf("   preloaded store.zero[0][0]\n");
+  }
+  
 
   for (int k = 1; k <= top_level; k++) {
 
@@ -405,23 +507,27 @@ int preload_matrix_store(void) {
     sm[1] = store.zero[0][k-1];
     sm[2] = MATRIX_PTR_INVALID;
     sm[3] = MATRIX_PTR_INVALID;
-    store.zero[0][k] = matrix_get_ptr_panel(sm, 0, k);
+    store.zero[0][k] = get_matPTR_from_array_of_four_subMatPTRs(sm, 0, k);
     if (!lock_matrix(store.zero[0][k])) {
-      printf("FAIL: row Z preload tried to lock a matrix which does not exist\n");
+      fprintf(stderr,"FAIL: row Z preload tried to lock a matrix which does not exist\n");
       exit(1);
     }
-
     // Case: COL_VECTOR (2**k,0)
     sm[0] = store.zero[k-1][0];
     sm[1] = MATRIX_PTR_INVALID;
     sm[2] = store.zero[k-1][0];
     sm[3] = MATRIX_PTR_INVALID;
-    store.zero[k][0] = matrix_get_ptr_panel(sm, k, 0);
+    store.zero[k][0] = get_matPTR_from_array_of_four_subMatPTRs(sm, k, 0);
     if (!lock_matrix(store.zero[k][0])) {
-      printf("FAIL: col Z preload tried to lock a matrix which does not exist\n");
+      fprintf(stderr,"FAIL: col Z preload tried to lock a matrix which does not exist\n");
       exit(1);
     }
   }
+  if (verbose) {
+    printf("Inside routine preload_matrix_store:\n");
+    printf("   preloaded row and column zero vectors into store.zero\n");
+  }
+
 
   // Case: MATRIX  (2**i,2**j) with (0 < i,j <= k) 
   for (int i = 1; i <= top_level; i++) {
@@ -430,201 +536,251 @@ int preload_matrix_store(void) {
       sm[1] = store.zero[i-1][j-1];
       sm[2] = store.zero[i-1][j-1];
       sm[3] = store.zero[i-1][j-1];
-      store.zero[i][j] = matrix_get_ptr_panel(sm, i, j);
+      store.zero[i][j] = get_matPTR_from_array_of_four_subMatPTRs(sm, i, j);
       if (!lock_matrix(store.zero[i][j])) {
-	printf("FAIL: matrix Z preload tried to lock a matrix which does not exist\n");
+	fprintf(stderr,"FAIL: matrix Z preload tried to lock a matrix which does not exist\n");
 	exit(1);
       }
     }
   }
 
   // Prestore all the IDENTITY matrices (square)
-  store.identity[0] = matrix_get_ptr_scalar(scalar1);
+  store.identity[0] = get_valMatPTR_from_val(scalar1);
   if (!lock_matrix(store.identity[0])) {
-      printf("FAIL: scalar 0 preload tried to lock a matrix which does not exist\n");
+      fprintf(stderr,"FAIL: scalar 0 preload tried to lock a matrix which does not exist\n");
       exit(1);
     }
+
 
   for (int i = 1; i <= top_level; i++) {
     sm[1] = sm[2] = store.zero[i-1][i-1];
     sm[0] = sm[3] = store.identity[i-1];
-    store.identity[i] = matrix_get_ptr_panel(sm, i, i);
+    store.identity[i] = get_matPTR_from_array_of_four_subMatPTRs(sm, i, i);
     if (!lock_matrix(store.identity[i])) {
-      printf("FAIL: I preload tried to lock a matrix which does not exist\n");
+      fprintf(stderr,"FAIL: I preload tried to lock a matrix which does not exist\n");
       exit(1);
     }
   }
 
+  if (verbose) {
+    printf("Inside routine preload_matrix_store:\n");
+    printf("   preloaded all identity matrices into store.identity\n");
+  }
+
+
   // Prestore all the integer HADAMARD matrices and scalar negative one.
 
   // Load scalar negative one into the otherwise un-used store.iHadamard[0]
-  store.iHadamard[0] = matrix_get_ptr_scalar(scalarM1);
-  if (!lock_matrix(store.iHadamard[0])) {
-      printf("FAIL: scalar negative one preload tried to lock a nonexistent matrix\n");
-      exit(1);
-    }
+  store.iHadamard[0] = get_valMatPTR_from_val(scalarM1);
+  // if -1 == 1 (eg. in boolean), avoid warning about locking a locked matrix. 
+  if (sca_eq(scalarM1, scalar1) == 0){
+      if (!lock_matrix(store.iHadamard[0])) {
+          fprintf(stderr,"FAIL: scalar negative one preload tried to lock a nonexistent matrix\n");
+          exit(1);
+      }
+  }
 
   sm[0] = sm[1] = sm[2] = store.identity[0];
   sm[3] = store.iHadamard[0];
-  store.iHadamard[1] = matrix_get_ptr_panel(sm,1,1);
+  store.iHadamard[1] = get_matPTR_from_array_of_four_subMatPTRs(sm,1,1);
   if (!lock_matrix(store.iHadamard[1])) {
-      printf("FAIL: iHadamard[1] preload tried to lock a nonexistent matrix\n");
+      fprintf(stderr,"FAIL: iHadamard[1] preload tried to lock a nonexistent matrix\n");
       exit(1);
     }
+
+  if (verbose) {
+    printf("Inside routine preload_matrix_store:\n");
+    printf("   preloaded iHadamard[1]\n");
+  }
+
 
   for (int i = 2; i <= top_level; i++) {
     sm[0] = sm[1] = sm[2] = store.iHadamard[i-1];
     sm[3] = scalar_mult(store.iHadamard[0],store.iHadamard[i-1]);
-    store.iHadamard[i] = matrix_get_ptr_panel(sm, i, i);
+    store.iHadamard[i] = get_matPTR_from_array_of_four_subMatPTRs(sm, i, i);
     if (!lock_matrix(store.iHadamard[i])) {
-      printf("FAIL: HH preload tried to lock a matrix which does not exist\n");
+      fprintf(stderr,"FAIL: HH preload tried to lock a matrix which does not exist\n");
       exit(1);
     }
   }
 
   //  Preload the other basic 1 and 2 bit matrices and set global names
+  if (verbose){printf("Initializing globals.\n");}
   init_globals();
  
+  sca_clear(&scalar0);
+  sca_clear(&scalar1);
+  sca_clear(&scalarM1);
+
   return 1;
 }
 
 
-// Python interface version 
-int64_t get_zero_matrixID(mat_level_t row_level, mat_level_t col_level) {
-  mat_add_t m_ptr = get_zero_matrix_ptr(row_level, col_level);
-  return get_matrixID_from_ptr(m_ptr);
- }  
-
-
-mat_add_t
-get_zero_matrix_ptr(mat_level_t row_level, mat_level_t col_level)  
+void exit_if_matrix_ptrs_invalid(const char *function, int mat_ptr_num, ...)
 {
-  if ((MAX(row_level,col_level)) > store.largest_level) 
+  // uses va_start, va_list and va_arg from stdarg.h to take a variable 
+  // number of inputs to routine.
+  va_list mat_ptrs;
+
+  int at_least_one_invalid = 0;
+  
+  va_start(mat_ptrs, mat_ptr_num);
+
+  for (int i = 0; i < mat_ptr_num; i++){
+    mat_ptr_t mat_ptr = va_arg(mat_ptrs, mat_ptr_t);
+    if (mat_ptr == MATRIX_PTR_INVALID){
+        at_least_one_invalid = 1;
+        fprintf(stderr,"ERROR: In %s the %dth (0-up) matrix checked was not a valid matrix.\n", function, i);
+    }
+  }
+  va_end(mat_ptrs);
+
+  if (at_least_one_invalid)
+    exit(EXIT_FAILURE);
+}
+
+// Python interface version 
+int64_t get_zero_matrixID(mat_level_t row_level, mat_level_t col_level)
+{
+  mat_ptr_t m_ptr = get_zero_matrix_ptr(row_level, col_level);
+  return get_matID_from_matPTR(m_ptr);
+}  
+
+mat_ptr_t get_zero_matrix_ptr(mat_level_t row_level, mat_level_t col_level)  
+{
+  mat_level_t highestInputLevel = MAX(row_level, col_level);
+
+  if (highestInputLevel > store.largest_level) 
   {
-    printf("Error: requested zero matrix larger than max_level input to create store.\n");
+    fprintf(stderr,"Error: requested zero matrix (levels %dx%d) larger than max_level input (%d) to create store.\n", row_level, col_level, store.largest_level);
     exit(1);
   }
-  return(store.zero[row_level][col_level]);
+  return store.zero[row_level][col_level];
 }
-
-
 
 // Python interface version 
-int64_t get_identity_matrixID(mat_level_t level) {
-  mat_add_t m_ptr = get_identity_matrix_ptr(level);
-  return get_matrixID_from_ptr(m_ptr);
+int64_t get_identity_matrixID(mat_level_t level)
+{
+  mat_ptr_t m_ptr = get_identity_matrix_ptr(level);
+  return get_matID_from_matPTR(m_ptr);
 }
 
-
-
-mat_add_t get_identity_matrix_ptr(mat_level_t level) {
-  if (level >  store.largest_level) 
+mat_ptr_t get_identity_matrix_ptr(mat_level_t level) 
+{
+  if (level > store.largest_level) 
     {
-      printf("Error: requested identity matrix has size %d\n",level);
-      printf("       which is larger than maximum matrix size %d.\n",store.largest_level);
+      fprintf(stderr,"Error: requested identity matrix has size %d\n", level);
+      fprintf(stderr,"       which is larger than maximum matrix size %d.\n", store.largest_level);
       exit(1);
     }
   
-  return(store.identity[level]);
+  return store.identity[level];
 }
-
-
 
 // Python interface version 
-int64_t get_iHadamard_matrixID(mat_level_t level) {
-  mat_add_t  m_ptr = get_iHadamard_matrix_ptr(level);
-  return get_matrixID_from_ptr(m_ptr);
+int64_t get_iHadamard_matrixID(mat_level_t level) 
+{
+  mat_ptr_t m_ptr = get_iHadamard_matrix_ptr(level);
+  return get_matID_from_matPTR(m_ptr);
 }
 
-
-
-
-mat_add_t get_iHadamard_matrix_ptr(mat_level_t level) {
-
+mat_ptr_t get_iHadamard_matrix_ptr(mat_level_t level) 
+{
   if (level == 0)
   {
-    printf("Error in get_iHadamard_matrix_ptr: there is no sensible definition ");
-    printf("for a level 0 Hadamard matrix\n");
+    fprintf(stderr,"Error in get_iHadamard_matrix_ptr: there is no sensible definition ");
+    fprintf(stderr,"for a level 0 Hadamard matrix\n");
     exit(1);
   }
 
   if (level > store.largest_level) 
   {
-    printf("Error: requested integer Hadamard matrix larger than maximum size.\n");
+    fprintf(stderr,"Error: requested integer Hadamard matrix larger than maximum size.\n");
     exit(1);
   }
 
-  return(store.iHadamard[level]);
+  return store.iHadamard[level];
 }
 
 
-int
-matrix_appears_as_sub_count_increment(mat_add_t id)
+uint32_t matrix_appears_as_sub_count_increment(mat_ptr_t id)
 {
-  return ++(id->appears_as_sub_count);
+  if ( ++(id->appears_as_sub_count) == 0) {
+    printf("ERROR: increment of sub_count caused overflow\n");
+    exit(1);
+  }
+  return id->appears_as_sub_count;
 }
 
 
-int
-matrix_appears_as_sub_count_decrement(mat_add_t id)
+uint32_t matrix_appears_as_sub_count_decrement(mat_ptr_t id)
 {
+  if (id->appears_as_sub_count==0) {
+    printf("ERROR: trying to decrement sub_count of zero\n");
+    exit(1);
+  }
   return --(id->appears_as_sub_count);
 }
 
-/// SCALAR
-/* Returns 0 if matrix differs from provided content, non-zero if equal */
-/* this function uses the round_sig_fig_real function to collapse nearly 
-   equivalent scalars to the same value, to sighash bits, given in larc.h */
-/* this function uses the collapse_near_zero function to collapse tiny numbers to zero 
-   with given threshold in larc.h collapse_near_zero(complex input, zerorealthresh) */
-//  WARNING: locality-approximation is used here, and could have dire consequences if
-//           you don't preload zeros and identities.
-/* The second argument of this routine scalar is a ScalarType (complex, double, int) */
-static int
-matrix_compare_scalar(mat_add_t m_ptr, ScalarType scalar)
+
+// This function compares the nbhd approx of a scalar obtained from
+// a matrix record with the nbhd approx of a (possibly unstored) new scalar
+/*!
+ * \ingroup larc
+ * \brief A utility function which gets the neighborhood approximation to a scalar and compares it with a value already in the matrix store
+ * \param m_ptr The pointer to a scalar value
+ * \param scalar A scalar value to compare with it
+ * \return 1 if the values are the same, 0 if they are different or m_ptr does not point to a scalar
+ */
+static int compare_nbhd_approx_stored_vs_new(mat_ptr_t m_ptr, scalarType scalar)
 {
+#ifdef DEBUG
+  printf("in %s\n",__func__);
+#endif
   // EASY CASES for failed comparison
-   if ((m_ptr == MATRIX_PTR_INVALID) || 
-       (matrix_type(m_ptr) != SCALAR) )
-  { 
-     return 0; 
+  if ((m_ptr == MATRIX_PTR_INVALID) || (matrix_type(m_ptr) != SCALAR))
+  {
+#ifdef DEBUG
+     printf(">>invalid pointer or not a scalar!\n");
+#endif
+     return 0;
   }
 
-#ifdef USE_INTEGER
-  // compare the two integers (no rounding should be present)
-  int iseq = (matrix_trace(m_ptr) == scalar);
+#ifdef DEBUG
+  printf("%s compares the nbhd approx of a scalar obtained from a matrix record\n", __func__);
+  printf("with the nbhd approx of a (possibly unstored) new scalar\n");
+  char *matrix_trace_string= sca_get_str(matrix_trace(m_ptr));
+  char *scalar_string = sca_get_str(scalar);
+  printf("nbhd approx of scalar stored in a record is %s, nbhd approx of the new scalar is %s.\n", matrix_trace_string,scalar_string); 
+  free(matrix_trace_string);
+  free(scalar_string);
+  printf("calling sca_eq_approx:\n");
+#endif    
+  
+  int approxs_are_eq = sca_eq_approx(matrix_trace(m_ptr), scalar);
+#ifdef DEBUG
+  printf("approxs_are_eq = %d\n",approxs_are_eq);
 #endif
-#ifndef USE_INTEGER   // COMPLEX or REAL
-  // Two scalars are treated as equivalant, if their locality-approximations are the same
-  // we are comparing one element from store and one new element
-  ScalarType marker_of_stored_element = locality_approx(matrix_trace(m_ptr));
-  ScalarType marker_of_new_element = locality_approx(scalar);
-
-  // TODO: change this check into part of unit testing.
-  // This should not happen if locality-approximation and storing are done correctly
-  if (marker_of_stored_element == 0.0 && !(matrix_is_zero(m_ptr)) ) {
-    printf("ERROR in %s, should not have stored value close to zero!\n",
-      __func__);
-    exit(1);
-  }
-  int iseq = (marker_of_stored_element == marker_of_new_element);
-#endif
-    
-  // return 1 if the elements locality-approximate to the same value
-  return(iseq);
-
+  return approxs_are_eq;
+#undef DEBUG
 }
+
+
 
 /// NON-SCALAR
 /* Returns 0 if matrix differs from provided content, non-zero if equal */
-/* The second argument of this routine mat_val_ptr is a
-   panel[4] which is a list giving the addresses of four matrix records.
-*/
-static int
-matrix_compare_panel(mat_add_t m_ptr, mat_add_t panel[4], matrix_type_t mat_type)
+/*!
+ * \ingroup larc
+ * \brief
+ * \param m_ptr The pointer to a stored matrix
+ * \param panel A set of four pointers to submatrices (which define a larger matrix)
+ * \param mat_type The type of matrix the panel describes, one of MATRIX, ROW_VECTOR, COL_VECTOR 
+ * \return 1 if the matrices are the same, 0 if not
+ */
+static int matrix_compare_panel(mat_ptr_t m_ptr, mat_ptr_t panel[4], matrix_type_t mat_type)
 {
   // EASY CASES for failed comparison
-   if ((m_ptr == MATRIX_PTR_INVALID) || (matrix_type(m_ptr) != mat_type) )
+  if ((m_ptr == MATRIX_PTR_INVALID) || (matrix_type(m_ptr) != mat_type))
   { 
      return 0; 
   }
@@ -636,58 +792,86 @@ matrix_compare_panel(mat_add_t m_ptr, mat_add_t panel[4], matrix_type_t mat_type
 }
 
 /* Returns the matrix PTR which matches scalar, starting from the hash */
-static mat_add_t
-matrix_find_scalar(uint64_t hash, ScalarType scalar)
+/*!
+ * \ingroup larc
+ * \brief Finds the matrix pointer for a given scalar value (does not add it to the matrix store if it is not found)
+ * \param hash A value indicating which hash chain would contain the scalar value
+ * \param scalar A scalarType value
+ * \return The matrix pointer to the stored scalar, or MATRIX_PTR_INVALID if not found
+ */
+static mat_ptr_t matrix_find_scalar(uint64_t hash, scalarType scalar)
 {
+
 #ifdef DEBUG 
-printf("In routine %s\n", __func__);
+  printf("In routine %s\n", __func__);
+  printf(">>>calling hash_get_chain\n");
 #endif
 
-	hash_node_t *n = hash_get_chain(store.hash_table, hash);
-	uint32_t depth = 0;
+  hash_node_t *n = hash_get_chain(store.hash_table, hash);
+  uint32_t depth = 0;
 
 #ifdef HASHSTATS
-        (store.hash_table->num_accesses[hash])++;
+  (store.hash_table->num_accesses[hash])++;
 #endif
 
-	while (n) {
-	  if (matrix_compare_scalar((mat_add_t)(n->record_ptr), scalar)) {
-                        store.hash_table->hits++;
-			n->hits++;
+  while (n) {
 
-			if (depth > store.deepest) {
-				store.deepest = depth;
-			}
+#ifdef DEBUG
+    printf(">>>in loop, comparing old and new approx values\n");
+#endif
+    if (compare_nbhd_approx_stored_vs_new((mat_ptr_t)(n->record_ptr), scalar)){
+      store.hash_table->hits++;    
+      n->hits++;
 
-			//THIS was commmented out before
+      if (depth > store.deepest) {
+        store.deepest = depth;
+      }
+
 #if 0
-			/* TODO: optimize hash chain order */
-			if (n != store.hash[hash]) {
-				struct node *head = store.hash[hash];
-				if (n->prev) n->prev->next = n->next;
-				if (n->next) n->next->prev = n->prev;
-				n->prev = NULL;
-				n->next = head;
-				if (head)
-				  head->prev = n;
-				store.hash[hash] = n;
-			}
+    // This code was a start at working on optimizing the hash chain order
+    if (n != store.hash[hash]) {
+      struct node *head = store.hash[hash];
+      if (n->prev) n->prev->next = n->next;
+      if (n->next) n->next->prev = n->prev;
+      n->prev = NULL;
+      n->next = head;
+      if (head)
+        head->prev = n;
+      store.hash[hash] = n;
+    }
 #endif
 
-			return (mat_add_t) (n->record_ptr);
-		}
-		n = n->next;
-		depth++;
-	} // end while
+#ifdef DEBUG 
+  printf("Leaving %s with valid matrix pointer\n", __func__);
+#endif
 
-	store.hash_table->misses++;
+      return (mat_ptr_t) (n->record_ptr);
+    }
+    n = n->next;
+    depth++;
+  } // end while
 
-	return MATRIX_PTR_INVALID;
+  store.hash_table->misses++;
+
+#ifdef DEBUG 
+  printf("Leaving %s with invalid matrix pointer\n", __func__);
+#endif
+
+  return MATRIX_PTR_INVALID;
+#undef DEBUG  
 }
 
 /* Returns the matrix PTR which matches panel, starting from the hash */
-static mat_add_t
-matrix_find_panel(uint64_t hash, mat_add_t panel[4], matrix_type_t mat_type)
+/*!
+ * \ingroup larc
+ * \brief Finds the matrix pointer for a given matrix as describe by a panel of submatrices (does not add it to the matrix store if it is not found)
+ * \param hash A value indicating which hash chain would contain the panel
+ * \param panel An array of four matrix pointers
+ * \param mat_type The type of matrix the panel describes, one of MATRIX, ROW_VECTOR, COL_VECTOR 
+ * \return The matrix pointer to the stored matrix, or MATRIX_PTR_INVALID if not found
+ */
+static mat_ptr_t
+matrix_find_panel(uint64_t hash, mat_ptr_t panel[4], matrix_type_t mat_type)
 {
 #ifdef DEBUG 
 printf("In routine %s\n", __func__);
@@ -702,7 +886,7 @@ printf("In routine %s\n", __func__);
 
 
 	while (n) {
-	  if (matrix_compare_panel((mat_add_t)(n->record_ptr), panel, mat_type)) {
+	  if (matrix_compare_panel((mat_ptr_t)(n->record_ptr), panel, mat_type)) {
                         store.hash_table->hits++;
 			n->hits++;
 
@@ -710,9 +894,9 @@ printf("In routine %s\n", __func__);
 				store.deepest = depth;
 			}
 
-			//THIS was commmented out before
+
 #if 0
-			/* TODO: optimize hash chain order */
+    // This code was a start at working on optimizing the hash chain order
 			if (n != store.hash[hash]) {
 				struct node *head = store.hash[hash];
 				if (n->prev) n->prev->next = n->next;
@@ -725,7 +909,7 @@ printf("In routine %s\n", __func__);
 			}
 #endif
 
-			return (mat_add_t) (n->record_ptr);
+			return (mat_ptr_t) (n->record_ptr);
 		}
 		n = n->next;
 		depth++;
@@ -736,14 +920,20 @@ printf("In routine %s\n", __func__);
 	return MATRIX_PTR_INVALID;
 }
 
-static int64_t record_mat_ptr_by_matrixID( mat_add_t m_ptr)
+/*!
+ * \ingroup larc
+ * \brief Add an entry to the table indexing matrix pointer values by matrixID
+ * \param m_ptr A pointer to a matrix
+ * \return The matrixID for that pointer
+ */
+static int64_t record_mat_ptr_by_matrixID( mat_ptr_t m_ptr)
 {
   // This function adds an entry to the table indexing matrix pointer values
   // by matrixID values. In the future, when we are more actively purging
   // matrices from the matrix store, this may be replaced with a hash.
   int64_t list_index;
   int64_t table_index;
-  int64_t index = get_matrixID_from_ptr(m_ptr);
+  int64_t index = get_matID_from_matPTR(m_ptr);
 
   // high order bits give index in the list of tables
   list_index = index >> LOG_SIZE_MPT;
@@ -753,16 +943,16 @@ static int64_t record_mat_ptr_by_matrixID( mat_add_t m_ptr)
 
   // TODO: this test may be redundant if we have the test when creating matrixIDs
   if (list_index >= SIZE_MPT) 
-    {
-      printf("ERROR: LOG_SIZE_MPT needs to be larger.\n");    // or, can modify code to allocate more tables as needed
-      exit(1);
-    }   
+  {
+    fprintf(stderr,"ERROR: LOG_SIZE_MPT needs to be larger.\n");    // or, can modify code to allocate more tables as needed
+    exit(1);
+  }   
 
   // if necessary, allocate memory for the next table in the list
   if (store.mat_ptr_table_list[list_index] == 0)    
-    {
-      store.mat_ptr_table_list[list_index] = (mat_add_t *)calloc(SIZE_MPT,sizeof(mat_add_t));
-    }
+  {
+    store.mat_ptr_table_list[list_index] = (mat_ptr_t *)calloc(SIZE_MPT,sizeof(mat_ptr_t));
+  }
   
   // with setup complete, add pointer to the appropriate table
   store.mat_ptr_table_list[list_index][table_index] = m_ptr;
@@ -771,18 +961,27 @@ static int64_t record_mat_ptr_by_matrixID( mat_add_t m_ptr)
 
 
 /* Inserts a new scalar matrix into the store and returns the new matrix PTR*/
-static mat_add_t
-matrix_insert_scalar(uint64_t hash, ScalarType scalar, mat_add_t adjoint)
-{
+// NOTE: a new copy of scalar is made for storage matrices (in trace_element)
+// so routines above this are responsible for releasing (sca_clear) scalar when
+// finished (namely the ones that initialize scalar). Similarly those routines
+// can then change scalar without changing the entry that was put into the
+// matrix store. 
+/*!
+ * \ingroup larc
+ * \brief Inserts a scalar value into the matrix store
+ * \param hash The hash for the scalar value
+ * \param scalar The scalarType value to be stored
+ * \return The matrix pointer for the stored scalar
+ */
+static mat_ptr_t matrix_insert_scalar(uint64_t hash, scalarType scalar) {
   
   int verbose = 0;
-  if (verbose) {   // GOT HERE
-    printf("Inside %s: levels (0,0), hash %" PRIu64 "\n",
-        __func__, hash);
+  if (verbose) {  
+    printf("Inside %s: levels (0,0), hash %" PRIu64 "\n", __func__, hash);
   }
   
   // allocate space for the new LARC matrix
-  mat_add_t m_ptr = calloc(1, sizeof(larc_matrix_t));
+  mat_ptr_t m_ptr = calloc(1, sizeof(larc_matrix_t));
   if (m_ptr == NULL) {
     ALLOCFAIL();
     return MATRIX_PTR_INVALID;
@@ -792,10 +991,9 @@ matrix_insert_scalar(uint64_t hash, ScalarType scalar, mat_add_t adjoint)
   m_ptr->matrixID = store.matrixID_next++;
   m_ptr->row_level = 0;
   m_ptr->col_level = 0;
-  m_ptr->adjoint = adjoint;
-  
-  if (verbose) {   //  GOT HERE
-    printf("  allocated space, set row level, col level, matrixID, and adjoint\n");
+
+  if (verbose) { 
+    printf("  allocated space, set row level, col level, and matrixID\n");
   }
   
 #ifndef HASH_CHAIN_GROWS_AT_HEAD
@@ -807,55 +1005,39 @@ matrix_insert_scalar(uint64_t hash, ScalarType scalar, mat_add_t adjoint)
   hash_insert_at_head(store.hash_table, (record_ptr_t)m_ptr, hash);
 #endif
 
-  if (verbose) {   //  GOT HERE
+  if (verbose) {
     printf("  appended hash chain with 0, 0levels\n");
   }
   
   // update matrix store parameters
   store.hist[0][0]++;
-  m_ptr->lock = 0;
+  m_ptr->info = 0;
   m_ptr->hold = 0;
+  m_ptr->lock = 0;
+  m_ptr->appears_as_sub_count = 0;
   
-  if (verbose) {   //  GOT HERE
-    printf("  set row level, col level, matrixID, and adjoint\n");
+  if (verbose) { 
+    printf("  set row level, col level, and matrixID\n");
   }
   
   if (verbose) {
-#ifdef USE_COMPLEX
-  printf("ADDING TO MATRIX SCALAR STORE: %ld -> %.25g + i * %.25g\n", m_ptr->matrixID, creal(scalar), cimag(scalar));
-#else
-#ifdef USE_REAL
-  printf("ADDING TO MATRIX SCALAR STORE: %ld -> %.25g\n", m_ptr->matrixID, scalar);
-#else // USE_INTEGER
-  printf("ADDING TO MATRIX SCALAR STORE: %ld -> %ld\n", m_ptr->matrixID, scalar);
-#endif
-#endif
+    char *scalar_string = sca_get_str(scalar);
+    printf("ADDING TO MATRIX SCALAR STORE: %ld -> %s\n", m_ptr->matrixID, scalar_string);
+    free(scalar_string);
   }
     
   // the trace of a 1x1 matrix is the element inside the matrix
-  m_ptr->trace_element = scalar;
+  // trace_element is a separate copy of scalar, not a reference to it. 
+  sca_init(&(m_ptr->trace_element));
+  sca_set(&(m_ptr->trace_element), scalar);
     
   // test to see if scalars are zero or one, and/or self-adjoint
-  // if a scalar is real, it is self-adjoint, since transpose of a 1x1 matrix
-  // and complex conjugation of a real number both leave the argument unchanged
-#ifdef USE_COMPLEX  // COMPLEX
-  if (fpclassify(cimag(scalar)) == FP_ZERO) {
-    m_ptr->iszero = (fpclassify(creal(scalar)) == FP_ZERO);
-    m_ptr->isid = (fpclassify(creal(scalar) - 1.0) == FP_ZERO);
-    m_ptr->adjoint = m_ptr;
-  }
-#else // not USE_COMPLEX
-#ifdef USE_REAL
-  m_ptr->iszero = (fpclassify(scalar) == FP_ZERO);
-  m_ptr->isid = (fpclassify(scalar - 1.0) == FP_ZERO);
-#endif
-#ifdef USE_INTEGER
-  m_ptr->iszero = (scalar==0);
-  m_ptr->isid = (scalar==1);
-#endif
-  m_ptr->adjoint = m_ptr;
-#endif // not USE_COMPLEX
-
+  scalarType *sca_id = &scratchVars.quick_use;
+  sca_set_str(sca_id, "0");
+  m_ptr->iszero = (0 != sca_eq(m_ptr->trace_element, *sca_id));
+  sca_set_str(sca_id, "1");
+  m_ptr->isid = (0 != sca_eq(m_ptr->trace_element, *sca_id));
+  
   store.nscalars++;
   if( store.nscalars > store.max_nscalars ) {
     store.max_nscalars = store.nscalars;
@@ -868,25 +1050,34 @@ matrix_insert_scalar(uint64_t hash, ScalarType scalar, mat_add_t adjoint)
 }
 
 /* Inserts a new matrix into the store and returns the new matrix PTR */
-static mat_add_t
-matrix_insert_panel(uint64_t hash, mat_add_t panel[4], mat_level_t row_level, mat_level_t col_level, mat_add_t adjoint)
+/*!
+ * \ingroup larc
+ * \brief Inserts a matrix into the matrix store
+ * \param hash The hash for the panel describing the matrix
+ * \param panel An array of four matrix pointers; the quadrant submatrices of the matrix to be stored
+ * \param row_level The row level of the matrix to be stored
+ * \param col_level The column level of the matrix to be stored
+ * \return The matrix pointer for the stored matrix
+ */
+static mat_ptr_t
+matrix_insert_panel(uint64_t hash, mat_ptr_t panel[4], mat_level_t row_level, mat_level_t col_level)
 {
   // EXCEPTION TESTING
   if (MAX(row_level,col_level) > store.largest_level){
-    printf("ERROR: In %s levels %d %d of incoming matrix too large\n",
+    fprintf(stderr,"ERROR: In %s levels %d %d of incoming matrix too large\n",
         __func__,row_level,col_level);
     exit(1);
   }
   
-  matrix_type_t mat_type = matrix_type_from_levels(row_level,col_level);
+  matrix_type_t mat_type = matrix_type_from_levels(row_level, col_level);
   int verbose = 0;
-  if (verbose) {   // GOT HERE
+  if (verbose) { 
     printf("Inside %s: levels (%d,%d), hash %" PRIu64 "\n",
         __func__, row_level, col_level, hash);
   }
   
   // allocate space for the new LARC matrix
-  mat_add_t m_ptr = calloc(1, sizeof(larc_matrix_t));
+  mat_ptr_t m_ptr = calloc(1, sizeof(larc_matrix_t));
   if (m_ptr == NULL) {
     ALLOCFAIL();
     return MATRIX_PTR_INVALID;
@@ -896,10 +1087,9 @@ matrix_insert_panel(uint64_t hash, mat_add_t panel[4], mat_level_t row_level, ma
   m_ptr->matrixID = store.matrixID_next++;
   m_ptr->row_level = row_level;
   m_ptr->col_level = col_level;
-  m_ptr->adjoint = adjoint;
   
-  if (verbose) {   //  GOT HERE
-    printf("  allocated space, set row level, col level, matrixID, and adjoint\n");
+  if (verbose) { 
+    printf("  allocated space, set row level, col level, and matrixID \n");
   }
   
 #ifndef HASH_CHAIN_GROWS_AT_HEAD
@@ -911,60 +1101,68 @@ matrix_insert_panel(uint64_t hash, mat_add_t panel[4], mat_level_t row_level, ma
   hash_insert_at_head(store.hash_table, (record_ptr_t)m_ptr, hash);
 #endif
 
-  if (verbose) {   //  GOT HERE
+  if (verbose) { 
     printf("  appended hash chain with %d, %d levels\n",row_level,col_level);
   }
   
   // update matrix store parameters
   store.hist[row_level][col_level]++;
-  m_ptr->lock = 0;
+  m_ptr->info = 0;
   m_ptr->hold = 0;
+  m_ptr->lock = 0;
+  m_ptr->appears_as_sub_count = 0;
   
-  if (verbose) {   //  GOT HERE
+  if (verbose) { 
     printf("  set row level, col level, matrixID, and adjoint\n");
   }
   
   if (mat_type == SCALAR) {
     // this shouldn't happen
-    printf("in matrix_insert_panel: somehow got SCALAR for mat_type\n");
+    fprintf(stderr,"in matrix_insert_panel: somehow got SCALAR for mat_type\n");
     exit(1);
   }
 
-  else if (mat_type == MATRIX) {   
+  else if (mat_type == MATRIX) {
 
     // Exception checking
     if( (matrix_row_level(panel[0]) != matrix_row_level(panel[1])) || 
 	(matrix_row_level(panel[0]) != matrix_row_level(panel[2])) ||
 	(matrix_row_level(panel[0]) != matrix_row_level(panel[3])) )
       {
-	printf( "ERROR: In %s trying to insert matrix with non-equal row sub-levels %d %d %d %d\n", __func__,
+	fprintf(stderr,"ERROR: In %s trying to insert matrix with non-equal row sub-levels %d %d %d %d\n", __func__,
 		matrix_row_level(panel[0]), matrix_row_level(panel[1]),
 		matrix_row_level(panel[2]), matrix_row_level(panel[3]) );
 	exit(1);
       }
 
+    if( (matrix_col_level(panel[0]) != matrix_col_level(panel[1])) || 
+	(matrix_col_level(panel[0]) != matrix_col_level(panel[2])) ||
+	(matrix_col_level(panel[0]) != matrix_col_level(panel[3])) )
+      {
+	fprintf(stderr,"ERROR: In %s trying to insert matrix with non-equal col sub-levels %d %d %d %d\n", __func__,
+		matrix_col_level(panel[0]), matrix_col_level(panel[1]),
+		matrix_col_level(panel[2]), matrix_col_level(panel[3]) );
+	exit(1);
+      }
+
     // define new matrix in terms of its four panels
     for (int i = 0; i < 4; i++) {
-      m_ptr->submatrix[i] = panel[i];
       if (panel[i] == NULL) {
-	printf("Error looking up submatrices\n");
+	fprintf(stderr,"Error looking up submatrices\n");
 	exit(1);
 	// return MATRIX_PTR_INVALID;
       }
       // each panel is a submatrix of the new matrix
+      m_ptr->submatrix[i] = panel[i];
       matrix_appears_as_sub_count_increment(panel[i]);
     }
 
     // special SQUARE MATRIX stuff
     if (row_level == col_level) {
       // trace of matrix is sum of traces of the two diagonal blocks
-      m_ptr->trace_element = panel[0]->trace_element + panel[3]->trace_element;
-    
-      // testing self-adjointness (fails if adjoint field is MATRIX_PTR_INVALID)
-      // this should be sufficient to cause the initially loaded square matrices
-      // (zeros, identities and integer Hadamards) to be seen as self-adjoint
-      if ((panel[1]->adjoint == panel[2]) && (panel[0]->adjoint == panel[0])
-           && (panel[3]->adjoint == panel[3])) { m_ptr->adjoint = m_ptr; }
+      //m_ptr->trace_element = panel[0]->trace_element + panel[3]->trace_element;
+      sca_init(&(m_ptr->trace_element));
+      sca_add(&(m_ptr->trace_element), panel[0]->trace_element, panel[3]->trace_element);
     } // end square matrix tests
 
     // testing for zero or identity matrices
@@ -972,7 +1170,8 @@ matrix_insert_panel(uint64_t hash, mat_add_t panel[4], mat_level_t row_level, ma
       if (matrix_is_zero(panel[0]) && matrix_is_zero(panel[3])) {
 	  // [0, 0; 0, 0] 
           m_ptr->iszero = 1;
-      } else if (matrix_is_id(panel[0]) && matrix_is_id(panel[3])) {
+      }
+      else if (matrix_is_id(panel[0]) && matrix_is_id(panel[3])) {
           // [I, 0; 0, I]; only possible for square matrices
           m_ptr->isid = 1;
       }
@@ -981,13 +1180,21 @@ matrix_insert_panel(uint64_t hash, mat_add_t panel[4], mat_level_t row_level, ma
 
   else if (mat_type == COL_VECTOR) {
     
+    // Exception checking
+    if( matrix_col_level(panel[0]) != matrix_col_level(panel[2]) )
+    {
+	fprintf(stderr,"ERROR: In %s trying to insert column vector with non-equal col sub-levels %d %d\n", __func__,
+		matrix_col_level(panel[0]), matrix_col_level(panel[2]) );
+	exit(1);
+    }
+    if ((panel[0] == NULL) || (panel[2] == NULL)) {
+      fprintf(stderr,"Error looking up submatrices\n");
+      exit(1);
+      // return MATRIX_PTR_INVALID;
+    }
+
     m_ptr->submatrix[0] = panel[0];
     m_ptr->submatrix[2] = panel[2];
-    if ((panel[0] == NULL) || (panel[2] == NULL)) {
-      printf("Error looking up submatrices\n");
-      exit(1);
-      return MATRIX_PTR_INVALID;
-    }
     matrix_appears_as_sub_count_increment(panel[0]);
     matrix_appears_as_sub_count_increment(panel[2]);
     
@@ -999,14 +1206,21 @@ matrix_insert_panel(uint64_t hash, mat_add_t panel[4], mat_level_t row_level, ma
  
   else if (mat_type == ROW_VECTOR) {
 
+    // exception checking
+    if( matrix_row_level(panel[0]) != matrix_row_level(panel[1]) )
+    {
+	fprintf(stderr,"ERROR: In %s trying to insert row vector with non-equal row sub-levels %d %d\n", __func__,
+		matrix_row_level(panel[0]), matrix_row_level(panel[1]) );
+	exit(1);
+    }
+    if ((panel[0] == NULL) || (panel[1] == NULL)) {
+      fprintf(stderr,"Error looking up submatrices\n");
+      exit(1);
+      // return MATRIX_PTR_INVALID;
+    }
 
     m_ptr->submatrix[0] = panel[0];
     m_ptr->submatrix[1] = panel[1];
-    if ((panel[0] == NULL) || (panel[1] == NULL)) {
-      printf("Error looking up submatrices\n");
-      exit(1);
-      return MATRIX_PTR_INVALID;
-    }
     matrix_appears_as_sub_count_increment(panel[0]);
     matrix_appears_as_sub_count_increment(panel[1]);
 
@@ -1029,26 +1243,15 @@ matrix_insert_panel(uint64_t hash, mat_add_t panel[4], mat_level_t row_level, ma
 
 
 /* Calculates the adjoint of a matrix and finds or inserts it into the store */
-static mat_add_t
-matrix_find_or_insert_adjoint(mat_add_t m_ptr)
+mat_ptr_t matrix_adjoint(mat_ptr_t m_ptr)
 {
   // EXCEPTION CHECKING
   if matrix_is_invalid(m_ptr) {
     return MATRIX_PTR_INVALID;
   }
 
-  // SHORTCUT: CHECK TO SEE IF WE ALREADY KNOW THIS MATRIX'S ADJOINT
-  // (note that self-adjoint cases not in operations store!)
-  if (m_ptr->adjoint != MATRIX_PTR_INVALID) return m_ptr->adjoint;
-  
   // CHECK TO SEE IF SOLUTION IN OPERATIONS STORE
-  mat_add_t adj_ptr = op_get(ADJOINT,m_ptr,m_ptr);
-
-  if (adj_ptr != MATRIX_PTR_INVALID) {
-    // we can get rid of this test once we're confident it all works
-    printf("in %s: m_ptr->adjoint not set, yet",__func__);
-    printf(" we found the adj_ptr in the operations store\n");
-  }
+  mat_ptr_t adj_ptr = op_get(ADJOINT,m_ptr,m_ptr);
 
   if (adj_ptr == MATRIX_PTR_INVALID) {
     matrix_type_t mat_type = matrix_type(m_ptr);
@@ -1059,24 +1262,23 @@ matrix_find_or_insert_adjoint(mat_add_t m_ptr)
   
     uint64_t hash;
     if (matrix_type(m_ptr) == SCALAR) {
-#ifdef USE_COMPLEX
-      ScalarType scalar;
+      if (sca_is_real(matrix_trace(m_ptr))) {
+        // adjoint of real number is that number, guaranteed to be in store
+        adj_ptr = m_ptr;
+      } else {
+        scalarType scalar;
+        sca_init(&scalar); 
       // adjoint of complex number might not be in store
-      scalar = conj(matrix_trace(m_ptr));
-      hash = hash_from_matrix_scalar(scalar, adjoint_type, store.hash_table->exponent);
-      adj_ptr = matrix_find_scalar(hash, scalar);
-      if matrix_is_invalid(adj_ptr) {
-        adj_ptr = matrix_insert_scalar(hash, scalar, m_ptr);
+        sca_conj(&scalar, matrix_trace(m_ptr));
+        hash = hash_from_matrix_scalar(scalar, adjoint_type, store.hash_table->exponent);
+        adj_ptr = matrix_find_scalar(hash, scalar);
+        if matrix_is_invalid(adj_ptr) {
+          adj_ptr = matrix_insert_scalar(hash, scalar);
+        }
+        sca_clear(&scalar);
       }
-#else
-      // adjoint of real number is that number, guaranteed to be in store
-      // in fact, m_ptr->adjoint should have already been set...
-      // the following code should never be accessed
-      printf("in %s: adj_ptr not set for a real scalar value\n",__func__);
-      adj_ptr = m_ptr;
-#endif
     } else {
-      mat_add_t panel[4];
+      mat_ptr_t panel[4];
       panel[0] = matrix_adjoint(matrix_sub(m_ptr,0));
       panel[1] = matrix_adjoint(matrix_sub(m_ptr,2));
       panel[2] = matrix_adjoint(matrix_sub(m_ptr,1));
@@ -1085,7 +1287,7 @@ matrix_find_or_insert_adjoint(mat_add_t m_ptr)
       adj_ptr = matrix_find_panel(hash, panel, adjoint_type);
       if matrix_is_invalid(adj_ptr) {
         adj_ptr = matrix_insert_panel(hash, panel, 
-                  matrix_col_level(m_ptr), matrix_row_level(m_ptr), m_ptr);
+                  matrix_col_level(m_ptr), matrix_row_level(m_ptr));
       }
     }
 
@@ -1093,47 +1295,41 @@ matrix_find_or_insert_adjoint(mat_add_t m_ptr)
     op_set(ADJOINT, m_ptr, m_ptr, adj_ptr);
   }  // end matrix was not found in operations store
 
-  // tell the matrices they are adjoints of each other
-  m_ptr->adjoint = adj_ptr;
-  adj_ptr->adjoint = m_ptr;
-
   return adj_ptr;
 }
 
 // These next two routines are used in the python interface
 // because we only let python users see matrixIDs
 int64_t
-matrix_get_matrixID_from_panel(int64_t A_mID, int64_t B_mID, int64_t C_mID, int64_t D_mID, 
+get_matID_from_four_subMatIDs(int64_t A_mID, int64_t B_mID, int64_t C_mID, int64_t D_mID, 
                         mat_level_t row_level, mat_level_t col_level) 
 {
 
   // grab the matrix pointers corresponding to each matrixID, and
-  // check that these matrices are still in the matrix store
-  mat_add_t  panel[4];
-  panel[0] = mat_ptr_from_matrixID(A_mID, "first", __func__,0);
-  panel[1] = mat_ptr_from_matrixID(B_mID, "second", __func__,0);
-  panel[2] = mat_ptr_from_matrixID(C_mID, "third", __func__,0);
-  panel[3] = mat_ptr_from_matrixID(D_mID, "fourth", __func__,0);
+  // checks on validity occur in get_matPTR_from_array_of_four_subMatPTRs
+  mat_ptr_t  panel[4];
+  panel[0] = get_matPTR_from_matID(A_mID, "first", __func__,0);
+  panel[1] = get_matPTR_from_matID(B_mID, "second", __func__,0);
+  panel[2] = get_matPTR_from_matID(C_mID, "third", __func__,0);
+  panel[3] = get_matPTR_from_matID(D_mID, "fourth", __func__,0);
 
-  // check to see if these matrix pointers are still in the store 
-  for (int i=0;i<4;++i) {
-    if (panel[i] == MATRIX_PTR_INVALID) { exit(1); }
-  }
-
-  mat_add_t m_ptr = matrix_get_ptr_panel(panel,row_level,col_level); 
+  mat_ptr_t m_ptr = get_matPTR_from_array_of_four_subMatPTRs(panel,row_level,col_level); 
   return m_ptr->matrixID;
 }
 
 // python interface for scalar type
-int64_t 
-matrix_get_matrixID_from_scalar(ScalarType val)
+int64_t get_valID_from_valString(char *val)
 {
-  mat_add_t m_ptr = matrix_get_ptr_scalar(val);
+  scalarType sca;
+  sca_init(&sca);
+  sca_set_str(&sca, val);
+  mat_ptr_t m_ptr = get_valMatPTR_from_val(sca);
+  sca_clear(&sca);
   return m_ptr->matrixID;
 }
 
-/* The first argument of this routine is a ScalarType (complex, double, int) */
-mat_add_t matrix_get_ptr_scalar(ScalarType scalar)
+/* The first argument of this routine is a scalarType (complex, double, int) */
+mat_ptr_t get_valMatPTR_from_val(scalarType scalar)
 {
   int verbose = 0;
   if (verbose) { 
@@ -1147,21 +1343,24 @@ mat_add_t matrix_get_ptr_scalar(ScalarType scalar)
 
   matrix_type_t mat_type = SCALAR;
   uint64_t hash = hash_from_matrix_scalar(scalar, mat_type, store.hash_table->exponent);
-  mat_add_t m_ptr = matrix_find_scalar(hash, scalar);
-  if (verbose) { 
-    printf("  About to check if the matrix was not found, m_ptr is %p\n",m_ptr);
+  if (verbose) {
+    printf("The hash of the nbhd approximation returned from hash_from_matrix_scalar is %zd\n",hash);
+  }
+  mat_ptr_t m_ptr = matrix_find_scalar(hash, scalar);
+  if (verbose) {
+    printf("  called matrix_find_scalar, result (m_ptr) is %p\n", m_ptr);
   }
   
-  // if unable to find attempt to insert
+  // if unable to find, attempt to insert
   if (m_ptr == MATRIX_PTR_INVALID) {
     if (verbose) { 
-          printf("Inside %s, matrix index not found by matrix_find\n",__func__);
+          printf("Inside %s, matrix ptr not found by matrix_find\n", __func__);
           printf("   CALLING  matrix_insert\n");
     }
-    m_ptr = matrix_insert_scalar(hash, scalar, MATRIX_PTR_INVALID);
+    m_ptr = matrix_insert_scalar(hash, scalar);
   }
   if (verbose) {   
-    printf("    RETURNED from matrix_insert with matrix index %p\n",m_ptr);
+    printf("    RETURNED from matrix_insert with matrix ptr %p\n", m_ptr);
   }
   
   // if couldn't insert, then bail out
@@ -1169,19 +1368,20 @@ mat_add_t matrix_get_ptr_scalar(ScalarType scalar)
     abort();
   }
   if (verbose) {
-    printf("Inside %s\n", __func__);
+    printf("Leaving %s\n", __func__);
   }
   
   return m_ptr;
 }
 
 /* The first argument of this routine mat_val_ptr is an address (void *) and
-   the element at that address is either a ScalarType (complex, double, int)
+   the element at that address is either a scalarType (complex, double, int)
    or panel[4] which is a list giving the addresses of four matrix records.
 */
-mat_add_t
-matrix_get_ptr_panel(mat_add_t panel[4], mat_level_t row_level, mat_level_t col_level)
+mat_ptr_t
+get_matPTR_from_array_of_four_subMatPTRs(mat_ptr_t panel[4], mat_level_t row_level, mat_level_t col_level)
 {
+
   int verbose = 0;
   if (verbose) { 
     printf("Inside %s:\n", __func__);
@@ -1193,8 +1393,73 @@ matrix_get_ptr_panel(mat_add_t panel[4], mat_level_t row_level, mat_level_t col_
   }
 
   matrix_type_t mat_type = matrix_type_from_levels(row_level,col_level);
+
+  // check to see if validity of matrix pointers match matrix type
+  if (mat_type == MATRIX){
+    for (int i = 0; i < 4; i++){
+      if (panel[i] == MATRIX_PTR_INVALID){
+        fprintf(stderr,"ERROR: attempting to form matrix from panels with invalid ptr in panel %d\n", i);
+        exit(EXIT_FAILURE);
+      }
+      else {
+        if (matrix_row_level(panel[i]) + 1 != row_level) 
+          fprintf(stderr,"WARNING on panel %d: row levels inconsistent\n",i);
+        if (matrix_col_level(panel[i]) + 1 != col_level) 
+          fprintf(stderr,"WARNING on panel %d: col levels inconsistent\n",i);
+      }
+    }
+  }
+  else if (mat_type == ROW_VECTOR){
+    for (int i = 0; i < 4; i++){
+      if (i < 2){
+        if (panel[i] == MATRIX_PTR_INVALID){
+          fprintf(stderr,"ERROR: attempting to form row vector from panels with invalid ptr in panel %d\n", i);
+          exit(EXIT_FAILURE);
+        }
+        else {
+          if (matrix_row_level(panel[i]) != row_level) 
+            fprintf(stderr,"WARNING on panel %d: row levels inconsistent\n",i);
+          if (matrix_col_level(panel[i]) + 1 != col_level) 
+            fprintf(stderr,"WARNING on panel %d: col levels inconsistent\n",i);
+        }
+      }
+      else {
+        if (panel[i] != MATRIX_PTR_INVALID){
+          fprintf(stderr,"ERROR: attempting to form row vector from panels with valid ptr in panel %d\n", i);
+          exit(EXIT_FAILURE);
+        }
+      }
+    }
+  }
+  else if (mat_type == COL_VECTOR){
+    for (int i = 0; i < 4; i++){
+      if (i % 2 == 0){
+        if (panel[i] == MATRIX_PTR_INVALID){
+          fprintf(stderr,"ERROR: attempting to form column vector from panels with invalid ptr in panel %d\n", i);
+          exit(EXIT_FAILURE);
+        }
+        else {
+          if (matrix_row_level(panel[i]) + 1 != row_level) 
+            fprintf(stderr,"WARNING on panel %d: row levels inconsistent\n",i);
+          if (matrix_col_level(panel[i]) != col_level) 
+            fprintf(stderr,"WARNING on panel %d: col levels inconsistent\n",i);
+        }
+      }
+      else{
+        if (panel[i] != MATRIX_PTR_INVALID){
+          fprintf(stderr,"ERROR: attempting to form column vector from panels with valid ptr in panel %d\n", i);
+          exit(EXIT_FAILURE);
+        }
+      }
+    }
+  }
+  else {
+    fprintf(stderr,"ERROR: attempting to form matrix of type %d from panels\n", mat_type);
+    exit(EXIT_FAILURE);
+  }
+
   uint64_t hash = hash_from_matrix_panel(panel, mat_type, store.hash_table->exponent);
-  mat_add_t m_ptr = matrix_find_panel(hash, panel, mat_type);
+  mat_ptr_t m_ptr = matrix_find_panel(hash, panel, mat_type);
   if (verbose) { 
     printf("  About to check if the matrix was not found, m_ptr is %p\n",m_ptr);
   }
@@ -1205,7 +1470,7 @@ matrix_get_ptr_panel(mat_add_t panel[4], mat_level_t row_level, mat_level_t col_
           printf("Inside %s, matrix index not found by matrix_find\n",__func__);
           printf("   CALLING  matrix_insert\n");
     }
-    m_ptr = matrix_insert_panel(hash, panel, row_level, col_level, MATRIX_PTR_INVALID);
+    m_ptr = matrix_insert_panel(hash, panel, row_level, col_level);
   }
   if (verbose) {   
     printf("    RETURNED from matrix_insert with matrix index %p\n",m_ptr);
@@ -1213,7 +1478,8 @@ matrix_get_ptr_panel(mat_add_t panel[4], mat_level_t row_level, mat_level_t col_
   
   // if couldn't insert, then bail out
   if (m_ptr == MATRIX_PTR_INVALID) {
-    abort();
+    fprintf(stderr,"ERROR: inserting matrix from panels into store failed.\n");
+    exit(EXIT_FAILURE);
   }
   if (verbose) {
     printf("Inside %s\n", __func__);
@@ -1239,24 +1505,14 @@ int64_t
 matrix_adjoint_matrixID(int64_t m_mID)
 {
   // get the matrix pointers from the matrixIDs, and see if still in store 
-  mat_add_t m_ptr = mat_ptr_from_matrixID(m_mID, "first", __func__,0);
+  mat_ptr_t m_ptr = get_matPTR_from_matID(m_mID, "", __func__,0);
   if (m_ptr == MATRIX_PTR_INVALID) { exit(1); }
 
   // call matrix pointer version of function
-  mat_add_t adjoint_ptr = matrix_adjoint(m_ptr);
-  int64_t adjoint_mID = get_matrixID_from_ptr(adjoint_ptr);
+  mat_ptr_t adjoint_ptr = matrix_adjoint(m_ptr);
+  int64_t adjoint_mID = get_matID_from_matPTR(adjoint_ptr);
   return adjoint_mID;
 }
-
-mat_add_t
-matrix_adjoint(mat_add_t m_ptr)
-{
-	if (m_ptr && m_ptr->adjoint != MATRIX_PTR_INVALID) {
-		return m_ptr->adjoint;
-	}
-	return matrix_find_or_insert_adjoint(m_ptr);
-}
-
 
 /* The total number of matrices created and stored in  */
 /* the matrix store (the current number of stored     */
@@ -1281,8 +1537,8 @@ num_matrices_created(void)
 // It can be used to confirm that a particular matrixID is valid.
 //
 
-mat_add_t
-mat_ptr_from_matrixID(int64_t matrixID, const char* arg_no, 
+mat_ptr_t
+get_matPTR_from_matID(int64_t matrixID, const char* arg_no, 
         const char* calling_routine, int print_flag) {
 
   // grab highest matrixID
@@ -1290,63 +1546,61 @@ mat_ptr_from_matrixID(int64_t matrixID, const char* arg_no,
 
   // check bounds
   if ((matrixID > highest_matrixID) || (matrixID < 0) ) {
-    printf("ERROR: In %s, the %s argument, matrixID %" PRId64 ", is out of range.\n",
-        calling_routine, arg_no, matrixID);
+    if (print_flag)
+      fprintf(stderr,"ERROR: In %s, the %s argument, matrixID %" PRId64 ", is out of range.\n",
+          calling_routine, arg_no, matrixID);
     return(MATRIX_PTR_INVALID);
   }
 
   // get matrix address
   int64_t list_index = matrixID >> LOG_SIZE_MPT;
   int64_t table_index = matrixID & MASK_MPT;
-  mat_add_t mat_val_ptr = store.mat_ptr_table_list[list_index][table_index];
+  mat_ptr_t mat_val_ptr = store.mat_ptr_table_list[list_index][table_index];
 
   // warn the user if the matrixID doesn't refer to a valid matrix
   if ((mat_val_ptr == MATRIX_PTR_INVALID) && (print_flag==1)) {
-    printf("WARNING: In %s, problem with the %s argument:",
+    fprintf(stderr,"WARNING: In %s, problem with the %s argument:",
         calling_routine, arg_no);
-    printf(" matrix with matrixID %" PRId64 " has been removed from the Matrix Store.\n",
+    fprintf(stderr," matrix with matrixID %" PRId64 " has been removed from the Matrix Store.\n",
          matrixID);
   }
 
   return mat_val_ptr;
 }
 
+/*!
+ * \ingroup larc
+ * \brief Writes statistic information about a matrix in the matrix_store to a file
+ * \param mat_ID The matrixID of the matrix 
+ * \param f A file pointer
+ * \return 1 
+ */
 static int  
-matrix_info_to_file(uint64_t i, FILE *f) {
+matrix_info_to_file(uint64_t mat_ID, FILE *f) {
   // EXCEPTIONS 
   if (f==NULL) { 
-    printf("WARN: %s called with bad file pointer\n", __func__); 
+    fprintf(stderr,"WARN: %s called with bad file pointer\n", __func__); 
     return(0); 
   } 
 
   // get the matrix pointers from the matrixID, and see if still in store 
-  mat_add_t m_ptr = mat_ptr_from_matrixID(i, "first", __func__,0);
+  mat_ptr_t m_ptr = get_matPTR_from_matID(mat_ID, "", __func__,0);
 
   if (matrix_is_invalid(m_ptr)) { return(1); }  // skip printing line
 
-  // HEADER: "matrixID   Levels    Value    Appears_As_Sub Count   Lock   Hold    Adjoint matrixID"
+  // HEADER: "matrixID   Levels    Value    Appears_As_Sub Count   Lock   Hold
   //   matrixID 
-  fprintf(f,"      %zd",get_matrixID_from_ptr(m_ptr));
+  fprintf(f,"      %zd",get_matID_from_matPTR(m_ptr));
   //   Levels
   fprintf(f,"    \t(%2d,%2d)",matrix_row_level(m_ptr),matrix_col_level(m_ptr)); 
   //   Value 
   if ((matrix_row_level(m_ptr) == 0) && (matrix_col_level(m_ptr) == 0)) {  // SCALAR
-
-#ifdef USE_INTEGER
-    fprintf(f," \t%ld                   ",
-              matrix_trace(m_ptr));
-#endif
-#ifdef USE_REAL  
-    fprintf(f," \t%g                   ",
-              matrix_trace(m_ptr));
-#endif
-#ifdef USE_COMPLEX
-    fprintf(f," \t%g + %g I            ",
-             creal(matrix_trace(m_ptr)),cimag(matrix_trace(m_ptr)));
-#endif
+    char *trace_string = sca_get_str(matrix_trace(m_ptr));
+    fprintf(f," \t%s                   ", trace_string);
+    free(trace_string);
   } 
   else {   // MATRIX
-    mat_add_t panel[4];
+    mat_ptr_t panel[4];
     fprintf(f,"   [ ");
     for (int i = 0; i < 4; i++) {
       panel[i] = matrix_sub(m_ptr,i); 
@@ -1354,21 +1608,13 @@ matrix_info_to_file(uint64_t i, FILE *f) {
 	fprintf(f,"  X ");
       }
       else {
-        fprintf(f,"%" PRId64 " ", get_matrixID_from_ptr(panel[i])); 
+        fprintf(f,"%" PRId64 " ", get_matID_from_matPTR(panel[i])); 
       }
     } 
     fprintf(f,"]        ");
   }
   //   Appears_As_Sub Count = Reference Count 
-  fprintf(f," \t%8d     %4d    %4d     ", matrix_appears_as_sub_count(m_ptr), matrix_has_lock(m_ptr), matrix_has_hold(m_ptr));
-  //   matrixID of Adjoint
-  mat_add_t adjoint_field = matrix_adjoint_field(m_ptr);
-  if (adjoint_field == MATRIX_PTR_INVALID) {
-    fprintf(f," \tX ");
-  }
-  else {
-    fprintf(f," \t%" PRId64 " ", get_matrixID_from_ptr(adjoint_field)); 
-  }
+  fprintf(f," \t%8u     %4d    %4d     ", matrix_appears_as_sub_count(m_ptr), matrix_has_lock(m_ptr), matrix_has_hold(m_ptr));
   //   End of this line 
   fprintf(f,"\n");
 
@@ -1389,7 +1635,7 @@ matrix_store_info_to_file(uint64_t start, uint64_t end,
                           char *outfilepath, char *comment)
 {
   if (start > end) {
-    printf("ERROR in matrix_store_info_to_file: impossible range %" PRIu64 " > %" PRIu64 "\n", start, end);
+    fprintf(stderr,"ERROR in matrix_store_info_to_file: impossible range %" PRIu64 " > %" PRIu64 "\n", start, end);
     return(0);
   }
 
@@ -1416,7 +1662,7 @@ matrix_store_info_to_file(uint64_t start, uint64_t end,
   fprintf(f,"Printing matrix store entries with matrixIDs from %" PRIu64 " to %" PRIu64 "\n",start,end);
   fprintf(f,"\n\n==========================(Matrix Store)=============================\n");
   fprintf(f,"matrixIDs       Levels           Value   ");
-  fprintf(f,"      Appears_As_SubCount    Lock    Hold     AdjointSN\n"); 
+  fprintf(f,"      Appears_As_SubCount    Lock    Hold\n"); 
   uint64_t i;
      for (i = start; i <= end; ++i) { 
        // fprintf(f,"   --- call to matrix_info_to_file(%d,f) ---\n",i);
@@ -1460,14 +1706,14 @@ matrix_hash_chain_info_to_file(uint64_t hash, char *outfilepath, char *comment)
   fprintf(f,"This is the matrix hash chain info for hash value %ld\n", hash); 
   fprintf(f,"\n\n===================(Matrix Hash Chain)=============================\n");
   fprintf(f,"MatrixID        Levels           Value   ");
-  fprintf(f,"        Appears_As_SubCount  AdjointSN\n"); 
+  fprintf(f,"        Appears_As_SubCount\n"); 
 
   hash_table_t *table_ptr = store.hash_table;
   hash_node_t *node_ptr = table_ptr->heads[hash];
-  mat_add_t record_ptr;
+  mat_ptr_t record_ptr;
 
   while (node_ptr)  {
-    record_ptr = (mat_add_t) node_ptr->record_ptr;
+    record_ptr = (mat_ptr_t) node_ptr->record_ptr;
     uint64_t matrixID = record_ptr->matrixID;
     ret = matrix_info_to_file(matrixID,f);
     node_ptr = node_ptr->next;
@@ -1500,290 +1746,162 @@ matrix_hash_chain_info_to_screen(uint64_t hash, char *comment)
 int remove_matrix_from_mat_store_by_matrixID (int64_t  m_mID) {
 
   // get the matrix pointers from the matrixIDs, and see if still in store 
-  mat_add_t m_ptr = mat_ptr_from_matrixID(m_mID, "first", __func__,0);
+  mat_ptr_t m_ptr = get_matPTR_from_matID(m_mID, "", __func__,0);
   
   // Python users could try to remove the same thing twice, but
   // we chose to not kill the program if they do this, just warn them.
   if (m_ptr == MATRIX_PTR_INVALID) {
-    printf("WARNING: In %s, matrix %" PRId64 " was formerly removed from the Matrix Store.\n", __func__, m_mID);
+    fprintf(stderr,"WARNING: In %s, matrix %" PRId64 " was formerly removed from the Matrix Store.\n", __func__, m_mID);
     return(0);
   }
 
-  return remove_matrix_from_mat_store (m_ptr);
+  return remove_matrix_from_mat_store_by_matrix_andor_node(m_ptr, NULL, 0);
 }
 
 
 
 /******************************************************************
-*          remove_matrix_from_mat_store (mat_add_t  m_ptr)
+*          remove_matrix_from_mat_store_by_matrix_andor_node (mat_ptr_t  m_ptr, hash_node_t *n, uint64_t supplied_hash)
 *  This function attempts to remove a larc_matrix_t structure 
 *  from the matrix store.
+*  If the node pointer n is not null, then n and supplied_hash will be used to
+*  delete the hash node from the hash table.
+*  If the node pointer n is null, the function will calculate the hash
+*  of the matrix from scratch and then search the hash table for
+*  the matrix.
 *     1 is returned if the remove succeeded
 *     0 is returned if the matrix could not be removed
 *       because it has larc_appears_as_subs or has a lock or hold.
 *******************************************************************/
-int remove_matrix_from_mat_store (mat_add_t  m_ptr)
+int remove_matrix_from_mat_store_by_matrix_andor_node (mat_ptr_t  m_ptr, hash_node_t *n, uint64_t supplied_hash)
 {
   // Exception checking
   if (matrix_is_invalid(m_ptr)) {
-    printf("WARNING: remove_matrix_from_mat_store called for invalid matrix pointer\n");
+    fprintf(stderr,"WARNING: %s called for invalid matrix pointer\n",__func__);
     return 0;
   }
  
   // Check if matrix has appears_as_subs or has a lock or hold
   if (matrix_appears_as_sub_count(m_ptr) != 0) return 0;
-  if (matrix_has_lock(m_ptr) == 1) return 0;
-  if (matrix_has_hold(m_ptr) == 1) return 0;
+  if (matrix_has_lock(m_ptr)) return 0;
+  if (matrix_has_hold(m_ptr)) return 0;
   
-  // If the matrix had an adjoint, then need to remove the adjoint's adjoint
-  mat_add_t adj_ptr = matrix_adjoint_field(m_ptr);
-  if (adj_ptr != MATRIX_PTR_INVALID) {
-     matrix_adjoint_field(adj_ptr) = MATRIX_PTR_INVALID;
-  }
-
   // If the matrix is not a SCALAR, then recursively remove it
   //   for each child of matrix, decrement appears_as_sub_count 
   //   and if child is now at zero counts  attempt to remove it
-  if (matrix_type(m_ptr) != SCALAR) {
+  matrix_type_t mat_type = matrix_type(m_ptr);
+  if (mat_type != SCALAR) {
+    //printf("DEBUG: record type not scalar in %s.\n", __func__); //debug
     for (int i=0;i<4;++i) {
-      mat_add_t child_ptr = matrix_sub(m_ptr, i);
+      mat_ptr_t child_ptr = matrix_sub(m_ptr, i);
       if (child_ptr != MATRIX_PTR_INVALID) {
-	int new_appears_as_sub_count = matrix_appears_as_sub_count_decrement(child_ptr);
-	if (new_appears_as_sub_count == 0) remove_matrix_from_mat_store (child_ptr);   
+	uint32_t new_appears_as_sub_count =
+                matrix_appears_as_sub_count_decrement(child_ptr);
+	if (new_appears_as_sub_count == 0)
+          remove_matrix_from_mat_store_by_matrix_andor_node(child_ptr, NULL, 0);
       }
     }
   }
 
   // Remove the matrix from the hash table for the matrix store
-
-  // Find the hash chain where the matrix is stored
-  uint64_t hash;
-  matrix_type_t mat_type = matrix_type(m_ptr);
-  if (mat_type == SCALAR) {
-    // ScalarType *mat_val_ptr;
-    // mat_val_ptr = &(matrix_trace(m_ptr));
-    // hash = hash_from_matrix_content(mat_val_ptr, SCALAR, store.hash_table->exponent);
-    hash = hash_from_matrix_scalar(matrix_trace(m_ptr), SCALAR, store.hash_table->exponent);
+  if (n) {
+    // If n is not null, use it to directly delete the hash node
+    hash_node_remove_node(store.hash_table, n, supplied_hash);
   } else {
-    // mat_add_t *mat_val_ptr;  // array of four pointers to matrix records
-    // mat_val_ptr = m_ptr->submatrix;
-    // hash = hash_from_matrix_content(mat_val_ptr, mat_type, store.hash_table->exponent);
-    hash = hash_from_matrix_panel(m_ptr->submatrix, mat_type, store.hash_table->exponent);
+    // If n is null, find the hash chain where the matrix is stored
+    uint64_t hash;
+    if (mat_type == SCALAR) {
+      //printf("DEBUG: record type scalar in %s.\n", __func__); //debug
+      hash = hash_from_matrix_scalar(matrix_trace(m_ptr), SCALAR, store.hash_table->exponent);
+    } else {
+      hash = hash_from_matrix_panel(m_ptr->submatrix, mat_type, store.hash_table->exponent);
+    }
+    hash_node_remove(store.hash_table, (record_ptr_t)m_ptr, hash);
   }
-  hash_node_remove(store.hash_table, (record_ptr_t)m_ptr, hash);
-  
-  
+
+  // Get row level and col level for matrix.
+  mat_level_t row_level;
+  mat_level_t col_level;
+  row_level = matrix_row_level(m_ptr);
+  col_level = matrix_col_level(m_ptr);
+
   // Decrement the histogram and counts of matrices and scalars
-  store.hist[matrix_row_level(m_ptr)][matrix_col_level(m_ptr)]--;
+  store.hist[row_level][col_level]--;
   if (mat_type == SCALAR) {
     store.nscalars--;
-#if 0
-    if( store.nscalars > store.max_nscalars ) {
-      printf("WARNING scalars: We do not expect this to happen in %s\n",__func__);
-      store.max_nscalars = store.nscalars;
-    }
-#endif
   } else {
     store.nmatrices--;
-#if 0
-    if( store.nmatrices > store.max_nmatrices ) {
-      printf("WARNING nonscalars: We do not expect this to happen in %s\n",__func__);
-      store.max_nmatrices = store.nmatrices;
-    }
-#endif
   }
+
+  // special SQUARE MATRIX stuff
+  if (row_level == col_level) {
+    // Free/clear the scalar
+    sca_clear(&(matrix_trace(m_ptr)));
+  }
+
+  // Food for thought: if the COMPLEX adjoint is added to the store just
+  // for this scalar matrix, then should it be removed as well? 
 
   // Remove the matrix pointer from the table indexed by matrixIDs
   table_mat_ptr_by_matrixID_Remove_entry(m_ptr);
 
-  // free the structure, note that no mallocs occur in the matrix
+  // free the structure, note that no mallocs other than scalar occur in the matrix
   free(m_ptr);
 
   return (1);
 }
 
 
+/******************************************************************
+*          remove_matrix_from_mat_store_by_matrix (mat_ptr_t  m_ptr)
+*  This function attempts to remove a larc_matrix_t structure 
+*  from the matrix store.
+*     1 is returned if the remove succeeded
+*     0 is returned if the matrix could not be removed
+*       because it has larc_appears_as_subs or has a lock or hold.
+*******************************************************************/
+int remove_matrix_from_mat_store_by_matrix (mat_ptr_t  m_ptr)
+{
+  return remove_matrix_from_mat_store_by_matrix_andor_node(m_ptr, NULL, 0);
+}
+
+
+/******************************************************************
+*          remove_matrix_from_mat_store_by_node (hash_node_t *n, uint64_t supplied_hash)
+*  This function attempts to remove a larc_matrix_t structure 
+*  from the matrix store.
+*     1 is returned if the remove succeeded
+*     0 is returned if the matrix could not be removed
+*       because it has larc_appears_as_subs or has a lock or hold.
+*******************************************************************/
+int remove_matrix_from_mat_store_by_node (hash_node_t *n, uint64_t supplied_hash)
+{
+  mat_ptr_t  m_ptr = (mat_ptr_t) n->record_ptr;
+  return remove_matrix_from_mat_store_by_matrix_andor_node(m_ptr, n, supplied_hash);
+}
+
+
 // Remove the matrix pointer from the table indexed by matrixIDs
 // by replacing the value with MATRIX_PTR_INVALID
 int
-table_mat_ptr_by_matrixID_Remove_entry(mat_add_t m_ptr){
+table_mat_ptr_by_matrixID_Remove_entry(mat_ptr_t m_ptr){
 
   // EXCEPTION CHECKING
   if (m_ptr == MATRIX_PTR_INVALID) { 
-    printf("ERROR: in %s\n", __func__); 
-    printf("   asked to remove m_idx =MATRIX_PTR_INVALID\n");
+    fprintf(stderr,"ERROR: in %s\n", __func__); 
+    fprintf(stderr,"   asked to remove m_idx =MATRIX_PTR_INVALID\n");
     exit(1);
   }
 
-  int64_t index = get_matrixID_from_ptr(m_ptr);
+  int64_t index = get_matID_from_matPTR(m_ptr);
      
   if (index != MATRIX_ID_INVALID) {
     int64_t list_index = index >> LOG_SIZE_MPT;
     int64_t table_index = index & MASK_MPT;
-    store.mat_ptr_table_list[list_index][table_index] =  MATRIX_PTR_INVALID;
+    store.mat_ptr_table_list[list_index][table_index] = MATRIX_PTR_INVALID;
   }
-
   return(1);
 
-}
-
-
-// Locality Approximation Functions
-
-#ifndef USE_INTEGER
-// This relies on IEEE 754
-// Rounds a single real number to the specified number 
-// of significant figures
-/*
-IEEE 754 double representation
-b = base = 2
-q = exponent
-s = sign bit, 0 for positive and 1 for negative
-c = significand = coefficient
-number = (-1)^s * c *  b^(q)  
-For double there is "bias" = 1023 = 2^10-1
-this allows the exponent to be represented
-by a number between 0 and 2048 = 2^11 "exp_rep"
-so that actually exponent is exp_rep - bias.
-DBL_MANT_DIG is the number of bits in the 
-mantissa in IEEE 754, Laurie and Jenny think
-this is 53 including the implicit bit.
-There is a implicit leading bit in the 
-mantissa that is always 1
-but is invisible), i.e. mantissa = 1.foo   
-where foo is the fractional part
-of the mantissa.
-UINT64_MAX is the all 1's 64-bit quantity
-We are guessing the order of the bits
-First 1 bit is the sign bit
-Next 11 bits are the bias+exp, 
-and the last 52 bits are the fractional part
-of the mantissa.
- */
-static double
-round_sig_fig_real(double input_real, int sig)
-{
-  //  ERROR CHECKING
-  if (sig <= 0) {
-    printf("Unwise use of %s keeping no bits (or neg bits) of mantissa\n",
-        __func__);
-    exit(1);
-  }
-  // since the default sig == DBL_MANT_DIG, the warning has been moved to 
-  // initialize_larc, and only prints for sig > DBL_MANT_DIG
-  if (sig >= DBL_MANT_DIG) {
-    //printf("Questionable use of %s keeping all bits of mantissa\n", __func__);
-    return(input_real);
-  }
-  if (isnan(input_real) ) {
-    printf("Inside %s a NaN showed up\n", __func__);
-    exit (1);
-  }
-
-  // a string 64 1's (1 sign bit, 11 exp+bias, 52 fractional mantissa)
-  // DBL_MANT_DIG = 53
-  // e.g. sig 5,  64 1's, shift left by (53-5)  to get 16 1's followed by 48 0's
-  //       the "implicit bit" is 1 bit of significance and we want 4 more 
-  //       fractional bits, to make sig = 5.
-  uint64_t mask = UINT64_MAX << (DBL_MANT_DIG - sig);  
-  //       mask_next is 1 bit past the ones we are keeping, to determine rounding
-  uint64_t mask_next = 1L << (DBL_MANT_DIG - (sig+1));
-
-  uint64_t our_int;
-
-  // if the input is negative, then make it positive before approximating
-  uint64_t negative = (input_real < 0.0);
-  double abs_input = (negative) ? -input_real : input_real;
-
-  // interpret the floating point as an integer and grab all the bits
-  uint64_t * ptr_to_fp = (uint64_t *) &abs_input;
-  our_int = *ptr_to_fp;
-
-  // check to see if the bit following our last bit of accuracy is a 1
-  uint64_t roundedBits = our_int & mask;
-  if (our_int & mask_next)
-    roundedBits += mask_next << 1;
-  double * ptr_to_double = (double *) &roundedBits;
-  double input_real_return = *ptr_to_double;
-  if (input_real_return < 0.0) {
-    printf("In %s there was a ripple carry all the way to sign bit\n",__func__);
-    exit(1);   // can't represent a number this large in floating point
-  }
-
-#if DEBUG
-  // If you are using this debug section you should consider printing abs_input
-  if (roundedBits != our_int)
-    printf("fp: %+17.8la (%g) > %+17.8la %lx (%g) > %lx (%lx) (%lx)\n", input_real, input_real, input_real_return, input_real_return,
-	   our_int,roundedBits, mask, mask_next);
-#endif
-
-  // restore sign of input after approximation completed
-  input_real_return =  (negative)? -input_real_return : input_real_return;
-  return input_real_return;
-}
-
-// Rounds a single real number to 0 if within threshold of zero
-static double
-collapse_near_zero_real(double input_real, double threshold)
-{
-  if (fabs(input_real) < threshold) {
-    input_real = 0.0;
-  }
-  return input_real;
-}
-#endif
-
-
-#ifdef USE_COMPLEX
-// Rounds each part (re/im) of complex input to no. of sig figs specified in larc.h
-static complex
-round_sig_fig_complex(complex scalar, int sig)
-{
-  return (round_sig_fig_real(creal(scalar),sig)
-        + I*round_sig_fig_real(cimag(scalar),sig));
-}
-
-// Rounds each part (re/im) of complex input to exactly zero
-// whenever that part is within threshold of zero
-static complex
-collapse_near_zero_complex(complex input, double threshold)
-{
-  return collapse_near_zero_real(creal(input),threshold) +
-        I*collapse_near_zero_real(cimag(input),threshold);
-}
-#endif
-
-ScalarType locality_approx(ScalarType scalar)
-{
-  // We do three things:  set marker = scalar
-  //    1. if fabs(marker) < zerorealthresh then set marker = 0
-  //    2. marker = truncate marker to sighash significant bits
-  //    3. if fabs(marker) < zerorealthresh then set marker = 0
-
-#ifdef USE_INTEGER
-  return scalar;
-#else
-  double zerorealthresh = get_zerorealthresh();
-  int sighash = get_sighash();
-
-  // collapse value to zero if it is small enough   
-  // round to sighash significant bits
-  // collapse value to zero if it is small enough   
-  
-#ifdef USE_COMPLEX
-  complex marker = collapse_near_zero_complex(scalar,zerorealthresh);
-  marker = round_sig_fig_complex(marker,sighash);
-  marker = collapse_near_zero_complex(marker,zerorealthresh);
-#endif
-  
-#ifdef USE_REAL
-  double marker = collapse_near_zero_real(scalar,zerorealthresh);
-  marker = round_sig_fig_real(marker,sighash);
-  marker = collapse_near_zero_real(marker,zerorealthresh);
-#endif
-  
-  return (marker);
-#endif
 }
 
 
@@ -1803,7 +1921,7 @@ int64_t matrix_hashID_from_matrixID(int64_t m_mID)
 {
 
   // get the matrix pointers from the matrixID, and see if still in store 
-  mat_add_t m_ptr = mat_ptr_from_matrixID(m_mID, "first", __func__,0);
+  mat_ptr_t m_ptr = get_matPTR_from_matID(m_mID, "", __func__,0);
   
   if (m_ptr == MATRIX_PTR_INVALID) { return(-1); }
 
@@ -1826,25 +1944,25 @@ int64_t matrix_hashID_from_matrixID(int64_t m_mID)
  *      The called function, remove_matrix_from_mat_store, will         *
  *      recursively remove eligible children of any deleted matrix      *      	
  ***********************************************************************/
- int clean_matrix_store()
- {
-	 uint64_t max = 1<<(store.hash_table->exponent);
-	 uint64_t i;
-	 
-	 // loop though hash chains for each hashID without calling
-	 // clean_op_hash_chain so we don't have to repeat checks for invalid hashID
-     for (i = 0; i < max; ++i) {
-		 hash_table_t *table_ptr = store.hash_table;
-		 hash_node_t *node_ptr = table_ptr->heads[i];
-		 mat_add_t record_ptr;
-		 
-		 while (node_ptr)  {
-			 record_ptr = (mat_add_t) node_ptr->record_ptr;
-			 remove_matrix_from_mat_store(record_ptr);
-			 node_ptr = node_ptr->next;
-			 }
-		 }
-	return (1);
+int clean_matrix_store()
+{
+    uint64_t max = 1L<<(store.hash_table->exponent);
+    uint64_t i;
+
+    // loop though hash chains for each hashID without calling
+    // clean_op_hash_chain so we don't have to repeat checks for invalid hashID
+    hash_table_t *table_ptr = store.hash_table;
+    for (i = 0; i < max; ++i) {
+        hash_node_t *node_ptr = table_ptr->heads[i];
+        hash_node_t *next_ptr;
+        
+        while (node_ptr) {
+            next_ptr = node_ptr->next;
+            remove_matrix_from_mat_store_by_node(node_ptr, i);
+            node_ptr = next_ptr;
+        }
+    }
+    return (1);
 }
 
  
@@ -1862,17 +1980,17 @@ int64_t matrix_hashID_from_matrixID(int64_t m_mID)
 	 uint64_t max = 1<<(store.hash_table->exponent);
 	 
 	 if ((hashID < 0) || (hashID >= max)) {
-		 printf("Error: hash value out of range\n");
+		 fprintf(stderr,"Error: hash value out of range\n");
 		 return(0);
 	}
 	hash_table_t *table_ptr = store.hash_table;
 	hash_node_t *node_ptr = table_ptr->heads[hashID];
-	mat_add_t record_ptr; 	
+        hash_node_t *next_ptr;
 	 
 	 while (node_ptr)  {
-		 record_ptr = (mat_add_t) node_ptr->record_ptr;
-		 remove_matrix_from_mat_store(record_ptr);
-		 node_ptr = node_ptr->next;
+		 next_ptr = node_ptr->next;
+		 remove_matrix_from_mat_store_by_node(node_ptr, hashID);
+		 node_ptr = next_ptr;
 	 }
 	 return (1);
  
@@ -1907,11 +2025,11 @@ matrix_hash_chain_length(uint64_t i)
     {
       hash_table_t *table_ptr = store.hash_table;
       hash_node_t *node_ptr = table_ptr->heads[i];
-      // mat_add_t record_ptr;
+      // mat_ptr_t record_ptr;
       
       while (node_ptr)  {
         ++counter;
-	// record_ptr = (mat_add_t) node_ptr->record_ptr;
+	// record_ptr = (mat_ptr_t) node_ptr->record_ptr;
 	// uint64_t matrixID =  record_ptr->matrixID;
 	// ret = matrix_info_to_file(matrixID,f);
 	node_ptr = node_ptr->next;
@@ -1945,3 +2063,330 @@ void matrix_hashstats(char *accesses_file,  char *nodes_file, char *report_file)
   hashstats_to_files(store.hash_table, accesses_file, nodes_file, report_file);
 }
 #endif
+
+
+/****************************************************************** 
+   The routine get_valString_from_matID_and_coords returns a string version
+   of the scalar located in (row,col) of the matrix with matrix mID
+   ALERT: It has a memory leak, because it is allocating space for
+   the string and not deleting it.
+   TODO: perhaps have matrixID in the name.
+********************************************************************/
+char *get_valString_from_matID_and_coords(int64_t mID, int64_t row, int64_t col)
+{
+    // get the matrix pointer from the matrixID
+    mat_ptr_t mPTR = get_matPTR_from_matID(mID, "", __func__, 0);
+
+    // call matrix pointer version of function with scalarType
+    // scalarType val;
+    // sca_init(&val);
+    scalarType *valPTR = &scratchVars.misc;
+    get_valPTR_from_matPTR_and_coords(valPTR, mPTR, row, col);
+    char *return_String = sca_get_str(*valPTR);
+    // sca_clear(&val);
+    return return_String;
+}
+
+  
+/****************************************************************** 
+   The routine get_valPTR_from_matPTR_and_coords is provided a pointer to scalar retScalar.
+   It will assign the value to retScalar of the scalar at the matrix position 
+   specified by indices (row,col) of the matrix with matrixID mID. 
+********************************************************************/
+void get_valPTR_from_matPTR_and_coords(scalarType *retScalar, mat_ptr_t mPTR, int64_t row, int64_t col)
+{
+
+  mat_ptr_t sPTR = get_valMatPTR_from_matPTR_and_coords(row, col, mPTR);
+  sca_set(retScalar, matrix_trace(sPTR));
+
+}
+
+
+
+/****************************************************************** 
+   The routine get_valID_from_matID_and_coords returns the matrixID of the
+   Scalar at the matrix position specified by indices (row,col) 
+   of the matrix with matrixID mID. 
+   This is the user safe wrapper for get_valMatPTR_from_matPTR_and_coords
+********************************************************************/
+int64_t get_valID_from_matID_and_coords(int64_t mID, int64_t row, int64_t col)
+{
+    // get the matrix pointer from the matrixID
+    mat_ptr_t mPTR = get_matPTR_from_matID(mID, "", __func__, 0);
+
+    mat_ptr_t scalarPTR;
+    
+    scalarPTR = get_valMatPTR_from_matPTR_and_coords(row, col, mPTR);
+
+    int64_t scalarID = get_matID_from_matPTR(scalarPTR);
+
+    return(scalarID);
+}    
+    
+
+// MatrixID wrapper for get_matPTR_from_oldMatPTR_newVal_and_coords. 
+int64_t get_matID_from_oldMatID_newValString_and_coords(int64_t mID, int64_t row, int64_t col, char *val)
+{
+    // get the matrix pointer from the matrixID
+    mat_ptr_t m = get_matPTR_from_matID(mID, "", __func__, 0);
+
+    // call matrix pointer version of function with scalarType
+    scalarType sca_val;
+    sca_init(&sca_val);
+    sca_set_str(&sca_val, val);
+    mat_ptr_t ret_ptr = get_matPTR_from_oldMatPTR_newVal_and_coords(m, row, col, sca_val);
+    sca_clear(&sca_val);
+
+    return get_matID_from_matPTR(ret_ptr);
+}
+
+
+// Create a new matrix that is the same as m but with the entry at
+// (row,col) set to v. This requires saving the panel values at each level
+// of recursion and modifying the appropriate panel entry for the submatrix
+// which has changed due to changing the scalar at (row,col)
+mat_ptr_t get_matPTR_from_oldMatPTR_newVal_and_coords(mat_ptr_t m, int64_t row, int64_t col, scalarType val)
+{
+  // return matrix if it already has val set at (row, col)
+  scalarType cur_val;
+  sca_init(&cur_val);
+  get_valPTR_from_matPTR_and_coords(&cur_val, m, row, col);
+  int val_already_at_entry = sca_eq(cur_val, val);
+  sca_clear(&cur_val);
+  if (val_already_at_entry)
+    return m;
+
+  // calculate the number of rows and columns in the matrix
+  int64_t num_rows = 1L << matrix_row_level(m);
+  int64_t num_cols = 1L << matrix_col_level(m);
+
+  // check to see if the indices for row, col are in span for the matrix
+  if (row >= num_rows){
+    fprintf(stderr,"ERROR: in get_matPTR_from_oldMatPTR_newVal_and_coords the row %ld is too large for matrix %p\n", row, m);
+    exit(1);
+  }
+
+  if (col >= num_cols){
+    fprintf(stderr,"ERROR: in get_matPTR_from_oldMatPTR_newVal_and_coords the col %ld is too large for matrix %p\n", col, m);
+    exit(1);
+  }
+
+  mat_ptr_t panels[4];
+
+  // Handle the scalar case
+  if (1 == num_rows && 1 == num_cols){
+    return get_valMatPTR_from_val(val);
+  }
+
+  // Handle the one-row case
+  if (1 == num_rows){
+
+    panels[0] = matrix_sub(m, 0);
+    panels[1] = matrix_sub(m, 1);
+    
+    if (2*col < num_cols) 
+      panels[0] = get_matPTR_from_oldMatPTR_newVal_and_coords(panels[0], row, col         , val);
+    else              
+      panels[1] = get_matPTR_from_oldMatPTR_newVal_and_coords(panels[1], row, col - num_cols/2, val);
+
+    return join(panels[0], panels[1]);
+  }
+
+  // Handle the one-column case
+  if (1 == num_cols){
+
+    panels[0] = matrix_sub(m, 0);
+    panels[1] = matrix_sub(m, 2);
+
+    if (2*row < num_rows) panels[0] = get_matPTR_from_oldMatPTR_newVal_and_coords(panels[0], row         , col, val);
+    else              panels[1] = get_matPTR_from_oldMatPTR_newVal_and_coords(panels[1], row - num_rows/2, col, val);
+
+    return stack(panels[0], panels[1]);
+  }
+
+  // At this point matrices have at least two columns and at least two
+  // rows, and the data structure at the next level down looks like four
+  // copies of this one.
+  for (int quad = 0; quad < 4; quad++) 
+    panels[quad] = matrix_sub(m, quad);
+
+  if (2*row < num_rows){
+    // element to be changed is in top half of matrix
+    if (2*col < num_cols) panels[0] = get_matPTR_from_oldMatPTR_newVal_and_coords(matrix_sub(m, 0), row         , col         , val);
+    else              panels[1] = get_matPTR_from_oldMatPTR_newVal_and_coords(matrix_sub(m, 1), row         , col - num_cols/2, val);
+  } 
+  else {
+    // element to be changed is in bottom half of matrix
+    if (2*col < num_cols) panels[2] = get_matPTR_from_oldMatPTR_newVal_and_coords(matrix_sub(m, 2), row - num_rows/2, col         , val);
+    else panels[3] = get_matPTR_from_oldMatPTR_newVal_and_coords(matrix_sub(m, 3), row - num_rows/2, col - num_cols/2, val);
+  }
+
+  return get_matPTR_from_array_of_four_subMatPTRs(panels, matrix_row_level(m), matrix_col_level(m));
+}
+
+
+
+// ROUTINE TO RETURN A SCALAR FROM A SPECIFIED MATRIX LOCATION
+// This is in io.c because it is called from print_naive_by_matPTR,
+// write_naive_by_matPTR, and write_matrix_nonzeros_by_matPTR.
+// It is not particularly efficient, but for the small matrices
+// which are feasible to print, efficiency is not needed.
+// TODO: We now also use this to allow python users to find ijth entry
+// thus we need reorganize and rename things e.g. getPTR getID ...
+/*********************************************************************
+ *                  get_valMatPTR_from_matPTR_and_coords                            *
+ *                                                                   *
+ *   This algorithm finds the ith jth entry of a matrix, by          *
+ *   looking at the binary representation of i and j and             *
+ *   recursively calling the function on the appropriate sub matrix  *
+ *   depending on the (high bit of i, high bit of j):                *
+ *     (0,0) -> sub_matrix[0],  (0,1) -> sub_matrix[1],              *
+ *     (1,0) -> sub_matrix[1],  (1,1)-> sub_matrix[3]                *
+ *                                                                   *
+ *   NOTE:  This function returns a mat_ptr_t return_ptr             *
+ *          To get the actual value of the i_jth entry  use          *
+ *          matrix_trace(return_ptr)                                 *
+ *********************************************************************/
+mat_ptr_t get_valMatPTR_from_matPTR_and_coords(long int row_i, long int col_j, mat_ptr_t m_ptr) 
+{
+
+  // calculate the total number of rows and columns in the matrix m_ptr
+  int64_t num_rows = 1L << matrix_row_level(m_ptr);
+  int64_t num_cols = 1L << matrix_col_level(m_ptr);
+
+  // check to see if the indices for row, col are in span for the matrix
+  if (row_i >= num_rows){
+    fprintf(stderr,"ERROR: in %s the row %ld is too large for matrix %p\n",
+	    __func__,row_i, m_ptr);
+    exit(1);
+  }
+
+  if (col_j >= num_cols){
+    fprintf(stderr,"ERROR: in %s the col %ld is too large for matrix %p\n",
+	    __func__,col_j, m_ptr);
+    exit(1);
+  }
+
+  
+  matrix_type_t mat_type = matrix_type(m_ptr);
+
+  // Case: SCALAR  return the matrix_ptr of that scalar
+  if (mat_type == SCALAR) {return m_ptr;
+  }
+
+  /*************************************************
+   * We want to determine which of the quadrant submatrices
+   * contains the row_i,col_j element that we are seeking.
+   * If we refer to these four quadrant submatrices as A00, A01, A10, A11
+   * then the first bit after A is 0 when the indexed row 
+   * is in the first half of the rows of the matrix, and 1
+   * when this indexed row is in the second half of rows.
+   * Similarly the second bit after A is determined by the columns.
+   * Thus A10 for example would be used if the row_i was 
+   * at least as big as half the total number of rows,
+   * and col_j was less than half the total number of columns.
+   * 
+   * The new indices used in the recursion are obtained
+   * by removing the top bit.
+  **************************************************/
+
+  // In all other cases the calculation will proceed recursively
+  // using a subpanel of the matrix and new_i and new_j
+  long int half_i_dim;  // half size i dimension
+  int i_adjust;    // 0 or half_i_dim depending on size of i
+  int i_top_bit = 0;
+  long int new_i = 0;  // mod off half dim
+  long int half_j_dim;  // half size j dimension
+  int j_adjust; // (0 or half_j_dim) depending on size of j
+  int j_top_bit = 0;
+  long int new_j = 0; // mod off half dim
+
+  // Case: mat_type  MATRIX / COL_VECTOR, calculate new_i, and i_top_bit
+  int row_level = matrix_row_level(m_ptr);
+  if (row_level > 0) {
+    half_i_dim = 1 << (row_level-1);  // half size i dimension
+    i_adjust = half_i_dim & row_i;   // 0 or half_i_dim depending on size of i
+    i_top_bit = i_adjust >> (row_level-1);
+    new_i = row_i - i_adjust; // mod off half dim
+  } 
+
+  // Case: mat_type  MATRIX / ROW_VECTOR, calculate new_j, and j_top_bit
+  int col_level = matrix_col_level(m_ptr);
+  if  (col_level > 0) {
+    half_j_dim = 1 << (col_level-1);  // half size j dimension
+    j_adjust = half_j_dim & col_j;   // (0 or half_j_dim) depending on size of j
+    j_top_bit = j_adjust >> (col_level-1);
+    new_j = col_j - j_adjust; // mod off half dim
+  }
+  
+  // Calculate the correct submatrix to use in recursive call
+  int panel_index = i_top_bit * 2 + j_top_bit;
+  return get_valMatPTR_from_matPTR_and_coords(new_i,new_j,matrix_sub(m_ptr,panel_index));
+
+}
+ 
+
+/************************************************************************
+*  The routine get_quad_in_submatrix (by Jenny and Steve)
+*  assumes the existence of a big matrix B.  B can be subdivided
+*  into a grid of level small_level submatrices.  Only one of 
+*  these submatrices of B contains the location (big_row,big_col).  
+*  Call this submatrix A. This routine mods off the high bits of 
+*  big_row and big_col to get the coordinates (small_row, small_col) 
+*  of the location  within A.  Then the routine returns the quad_index 
+*  which labels the quadrant submatrix of A that contains the location
+*  (small_row,small_col).
+*  These quadrant submatrices, as usual, are numbered 0,1,2,3.
+************************************************************************/
+int get_quad_in_submatrix(int64_t big_row, int64_t big_col,
+			  mat_level_t small_level) {
+  int64_t small_row = big_row % (1L<<small_level);  /* small_level low bits */
+  int64_t small_col = big_col % (1L<<small_level); /* small_level low bits */
+  int quad_index = 2*(small_row>>(small_level-1))+(small_col>>(small_level-1));
+  return quad_index;
+}
+
+
+
+/************************************************************************
+*  This routine will return a square matrix of the given level with a
+*  single nonzero entry specified by the matrix PTR one_scalar, located
+*  at position (row,col), where row and col are  zero-indexed.
+*  Note: when the user makes this call, i and j need to be smaller than 
+*        the dimension of the matrix.  But, when this calls itself, 
+*        i and j will not change even as the level is reduced.  This 
+*        is all handled gracefully in get_quad_in_submatrix.
+************************************************************************/
+mat_ptr_t get_matPTR_single_nonzero_using_valPTR_at_coords(mat_level_t level,
+	  int64_t row_i, int64_t col_j, scalarType *one_scalar) {
+  mat_ptr_t result_ptr;
+
+  // If one_scalar is scalar0 then do not need to do the recursion
+  // and can return zero matrix
+  if (sca_eq(*one_scalar,scalar0))  return (get_zero_matrix_ptr(level,level));
+
+  // if level> zero, create a matrix from three zero panels, and one panel
+  // with the scalar one_scalar in the appropriate position
+  mat_ptr_t panel[4];
+
+  // Get the matrix ptr for the zero matrix of one level down
+  mat_ptr_t zero_matrix = get_zero_matrix_ptr(level-1,level-1);
+
+  int i;
+
+  // Loop through and intialize all the panels to zero matrices
+  for (i=0; i < 4 ; i++) {
+    panel[i] = zero_matrix;
+  }
+
+  // Find out which panel should contain one_scalar and set by a recursive call
+  int panel_number = get_quad_in_submatrix(row_i, col_j, level-1);
+
+  panel[panel_number] = get_matPTR_single_nonzero_using_valPTR_at_coords(level-1, row_i, col_j, one_scalar);
+  
+  // build a matrix from the four panels
+  result_ptr = get_matPTR_from_array_of_four_subMatPTRs(panel, level, level);
+
+  return (result_ptr); 
+}
+

@@ -1,35 +1,67 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
-#################################################################
-#                                                               #
-# Copyright 2014, Institute for Defense Analyses                #
-# 4850 Mark Center Drive, Alexandria, VA; 703-845-2500          #
-# This material may be reproduced by or for the US Government   #
-# pursuant to the copyright license under the clauses at DFARS  #
-# 252.227-7013 and 252.227-7014.                                #
-#                                                               #
-# LARC : Linear Algebra via Recursive Compression               #
-# Authors:                                                      #
-#   - Steve Cuccaro (IDA-CCS)                                   #
-#   - John Daly (LPS)                                           #
-#   - John Gilbert (UCSB, IDA adjunct)                          #
-#   - Jenny Zito (IDA-CCS)                                      #
-#                                                               #
-# Additional contributors are listed in "LARCcontributors".     #
-#                                                               #
-# POC: Jennifer Zito <jszito@super.org>                         #
-# Please contact the POC before disseminating this code.        #
-#                                                               #
-#################################################################
+ ##################################################################
+ #                                                                #
+ # Copyright (C) 2014, Institute for Defense Analyses             #
+ # 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           #
+ # This material may be reproduced by or for the US Government    #
+ # pursuant to the copyright license under the clauses at DFARS   #
+ # 252.227-7013 and 252.227-7014.                                 #
+ #                                                                #
+ # LARC : Linear Algebra via Recursive Compression                #
+ # Authors:                                                       #
+ #   - Steve Cuccaro (IDA-CCS)                                    #
+ #   - John Daly (LPS)                                            #
+ #   - John Gilbert (UCSB, IDA adjunct)                           #
+ #   - Jenny Zito (IDA-CCS)                                       #
+ #                                                                #
+ # Additional contributors are listed in "LARCcontributors".      #
+ #                                                                #
+ # Questions: larc@super.org                                      #
+ #                                                                #
+ # All rights reserved.                                           #
+ #                                                                #
+ # Redistribution and use in source and binary forms, with or     #
+ # without modification, are permitted provided that the          #
+ # following conditions are met:                                  #
+ #   - Redistribution of source code must retain the above        #
+ #     copyright notice, this list of conditions and the          #
+ #     following disclaimer.                                      #
+ #   - Redistribution in binary form must reproduce the above     #
+ #     copyright notice, this list of conditions and the          #
+ #     following disclaimer in the documentation and/or other     #
+ #     materials provided with the distribution.                  #
+ #   - Neither the name of the copyright holder nor the names of  #
+ #     its contributors may be used to endorse or promote         #
+ #     products derived from this software without specific prior #
+ #     written permission.                                        #
+ #                                                                #
+ # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND         #
+ # CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,    #
+ # INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF       #
+ # MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE       #
+ # DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT HOLDER NOR        #
+ # CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,   #
+ # SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT   #
+ # NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;   #
+ # LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)       #
+ # HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN      #
+ # CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR   #
+ # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, #
+ # EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.             #
+ #                                                                #
+ ##################################################################
+
+from __future__ import print_function
 
 import os
 import glob
 import sys
+import random # needed for toeplitz
+import numpy as np # needed for toeplitz
 sys.path.append(os.path.join(os.path.dirname(__file__),"../../src"))
 import pylarc
-import numpy as np
 from ctypes import *
-
 
 if __name__ == '__main__':
 
@@ -47,9 +79,9 @@ if __name__ == '__main__':
     cs = 0        # on desktop workstation, with smaller memory
     if (machine.find('cs') >= 0):
         cs = 1    # on CPU-cycle server cs1-cs6, with larger memory
-        print "This machine is a CPU-cycle server"
+        print("This machine is a CPU-cycle server")
     else:
-        print "This machine is a desktop work station"
+        print("This machine is a desktop work station")
 
 
     #######################################
@@ -116,20 +148,20 @@ if __name__ == '__main__':
 
 
         ######################################################
-
-        pylarc.initialize_larc(matrix_exponent,op_exponent,max_level,rnd_sig_bits,trunc_to_zero_bits)
+        verbose = 1
+        pylarc.initialize_larc(matrix_exponent,op_exponent,max_level,rnd_sig_bits,trunc_to_zero_bits,verbose)
         pylarc.create_report_thread(180)
         print_naive = 0
         print_nonzeros = 0
-        print "Problem size is small enough to run on desktop"
+        print("Problem size is small enough to run on desktop")
         if print_naive:
-           print "  will print files of naive matrices"
+           print("  will print files of naive matrices")
         else: 
-           print "  not printing files of naive matrices"
+           print("  not printing files of naive matrices")
         if print_nonzeros:
-           print "  will print files of nonzero matrices\n"
+           print("  will print files of nonzero matrices\n")
         else: 
-           print "  not printing files of nonzero matrices\n"
+           print("  not printing files of nonzero matrices\n")
     ## LARGE STORES for cs1l,cs4l,cs9l
     else:      
         ## matrix_exponent = 26
@@ -140,63 +172,75 @@ if __name__ == '__main__':
         trunc_to_zero_bits = -1 # default value
         ## trunc_to_zero_bits = 20 # truncate to zero if value is less than 2**(-threshold)
         ## trunc_to_zero_bits = 16 # truncate to zero if value is less than 2**(-threshold)
-        pylarc.initialize_larc(matrix_exponent,op_exponent,max_level,rnd_sig_bits,trunc_to_zero_bits)
+        verbose = 1
+        pylarc.initialize_larc(matrix_exponent,op_exponent,max_level,rnd_sig_bits,trunc_to_zero_bits,verbose)
         pylarc.create_report_thread(3600)   # once per hour 3600
         print_naive = 0      
         print_nonzeros = 0
-        print "Problem size is NOT small enough to run on desktop"
+        print("Problem size is NOT small enough to run on desktop")
         if print_naive:
-           print "  WARNING: will try to print files of naive matrices!!!"
+           print("  WARNING: will try to print files of naive matrices!!!")
         else: 
-           print "  not printing files of naive matrices"
+           print("  not printing files of naive matrices")
         if print_nonzeros:
-           print "  WARNING: will print files of nonzero matrices!!!\n"
+           print("  WARNING: will print files of nonzero matrices!!!\n")
         else: 
-           print "  not printing files of nonzero matrices\n"
+           print("  not printing files of nonzero matrices\n")
 
-    print "Finished creating LARC matrix and op stores and loading basic matrices.\n"
-    print "Seppuku check to see if program is to large to occur once every 10 minutes.\n"
+    print("Finished creating LARC matrix and op stores and loading basic matrices.\n")
+    print("Seppuku check to see if program is to large to occur once every 10 minutes.\n")
 
 
+    
+    # Define string for using in formating filenames
+    scalarTypeStr = pylarc.cvar.scalarTypeStr
 
-    ################################
-    # inverse permutation matrices #
-    ################################
-    PI_3 = pylarc.create_perm_inv_matrixID(3)
-    ###############################
-    # create D matrices in python #
-    ###############################
-    D_3 = pylarc.create_fft_D_matrixID(3)
-    ###############################
-    # create C matrices in python #
-    ###############################
-    C_3 = pylarc.create_fft_C_matrixID(3)
-    #################################
-    # create FFT matrices in python #
-    #################################
-    print "\nF_3 matrix is:"
-    F_3 = pylarc.create_fft_matrix_matrixID(3)
-    pylarc.print_matrix_naive_by_matrixID(F_3)
-    ##########################
-    # take  fft of a vector  #
-    ##########################
-    A_arr = pylarc.buildArray([1,0,0,0,0,1,0,0])
-    rowLevel = 3
-    colLevel = 0
-    dimWhole = 1 << colLevel
-    A_mID = pylarc.row_major_list_to_store_matrixID(A_arr,rowLevel,colLevel,dimWhole)
-    B_mID = pylarc.matrix_mult_matrixID(F_3,A_mID)
 
-    #########################
-    # print roots of unity  #
-    #########################
-    print "\n"
-    pylarc.print_pow2_roots_unity(3)
+    ##  START OF CODE STOLEN FROM toeplitz.py
 
-    #########################
-    # precision testing     #
-    #########################
-    pylarc.precision_testing()
+    # build array in C from Python list of scalars
+    # print("Using row_major_list_to_store on data entered from python\n")
+
+    # parameters for entering the python array into the store
+    level = 8
+    dim_whole = 2**level
+
+    if scalarTypeStr in ("Real", "MPReal", "MPRational"):
+        randVals = [ random.random() for i in range(2*dim_whole-1)]
+    elif scalarTypeStr in ("Complex", "MPComplex", "MPRatComplex"):
+        randVals = [ np.complex(random.random(),random.random()) for i in range(2*dim_whole-1)]
+    elif scalarTypeStr in ("Integer", "MPInteger"):
+        randVals = [ random.randrange(0,10001) for i in range(2*dim_whole-1)]
+    else:
+        raise Exception('Do not know how to build matrix for type %s.' %scalarTypeStr)
+
+    # create toeplitz matrix from the 2*dim_whole-1 random numbers
+    a = []
+    b = randVals
+    # print("b: ", b)
+    for i in range(dim_whole):
+        a.append(list(b[dim_whole-i-1:2*dim_whole-i-1]))
+    # print("a: ", a)
+    amat = np.matrix(a)
+    alist = amat.reshape(-1).tolist()[0]
+    #print alist
+    arr = pylarc.map_to_str(alist, scalarTypeStr)
+    # print 'arr:', pylarc.str_scalarTypeArray(arr, len(alist))
+
+    # creating or finding the matrix associated with the array
+    top_ID = pylarc.row_major_list_to_store_matrixID(arr, level, level, dim_whole)
+    # filename_json = "../dat/out/toeplitz.lev%d.%s.json" %(level,scalarTypeStr)
+    # pylarc.print_naive_by_matID(serial)
+    # print("\n")
+    # pylarc.write_larcMatrix_file_by_matID(serial,os.path.join(os.path.dirname(__file__),filename_json))
+
+    ##  END OF CODE STOLEN FROM toeplitz.py
+
+    # some operations to put in the store
+    A_ID = pylarc.matrix_add_matrixID(top_ID,top_ID)
+    B_ID = pylarc.matrix_mult_matrixID(A_ID,top_ID)
+    
+
 
 
     # #############################
@@ -207,11 +251,11 @@ if __name__ == '__main__':
     # pylarc.rusage_report(0,"../dat/out/temp.rusage0_report")
     # pylarc.rusage_report(1,"../dat/out/temp.rusage1_report")
 
-    print "\n"
+    print("\n")
     pylarc.matrix_store_report("stdout")
-    print "\n"
+    print("\n")
     pylarc.op_store_report("stdout")
-    print "\n"
+    print("\n")
     pylarc.rusage_report(0,"stdout")
-    print "\n"
+    print("\n")
     pylarc.rusage_report(1,"stdout")

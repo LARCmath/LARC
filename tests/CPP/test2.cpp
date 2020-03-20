@@ -13,12 +13,14 @@ void initialize ( )
   int    zerobitthresh        = ZEROBITTHRESH_DEFAULT;
   int    sighash              = SIGHASH_DEFAULT;
   mat_level_t max_level       = DEFAULT_MAX_LEVEL;
+  int	 verbose	      = 1;
 
   initialize_larc ( hash_exponent_matrix , 
 		    hash_exponent_op     ,
 		    max_level            ,
 		    sighash              ,
-		    zerobitthresh        );
+		    zerobitthresh        ,
+		    verbose              );
 }
 
 int main ( int argc , char *argv[] )

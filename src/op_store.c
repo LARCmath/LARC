@@ -2,7 +2,7 @@
 //   Matrix Operations Stores for LARC
 /******************************************************************
  *                                                                *
- * Copyright 2014, Institute for Defense Analyses                 *
+ * Copyright (C) 2014, Institute for Defense Analyses             *
  * 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           *
  * This material may be reproduced by or for the US Government    *
  * pursuant to the copyright license under the clauses at DFARS   *
@@ -17,8 +17,38 @@
  *                                                                *
  * Additional contributors are listed in "LARCcontributors".      *
  *                                                                *
- * POC: Jennifer Zito <jszito@super.org>                          *
- * Please contact the POC before disseminating this code.         *
+ * Questions: larc@super.org                                      *
+ *                                                                *
+ * All rights reserved.                                           *
+ *                                                                *
+ * Redistribution and use in source and binary forms, with or     *
+ * without modification, are permitted provided that the          *
+ * following conditions are met:                                  *
+ *   - Redistribution of source code must retain the above        *
+ *     copyright notice, this list of conditions and the          *
+ *     following disclaimer.                                      *
+ *   - Redistribution in binary form must reproduce the above     *
+ *     copyright notice, this list of conditions and the          *
+ *     following disclaimer in the documentation and/or other     *
+ *     materials provided with the distribution.                  *
+ *   - Neither the name of the copyright holder nor the names of  *
+ *     its contributors may be used to endorse or promote         *
+ *     products derived from this software without specific prior *
+ *     written permission.                                        *
+ *                                                                *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND         *
+ * CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,    *
+ * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF       *
+ * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE       *
+ * DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT HOLDER NOR        *
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,   *
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT   *
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;   *
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)       *
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN      *
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR   *
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, *
+ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.             *
  *                                                                *
  *****************************************************************/
 
@@ -87,7 +117,7 @@ op_store_report(char *outfilepath)
   fprintf(f,"Statistics for each operation:\n");
   for (int i=0; i<INVALID_OP; ++i)
   {
-    fprintf(f,"%-12s: %12ld records created, %12ld current records\n",
+    fprintf(f,"%-14s: %12ld records created, %12ld current records\n",
        op_names[i], store.oprecords_total_created[i],
        store.oprecords_stored_now[i]);
   }
@@ -110,15 +140,22 @@ create_op_store(size_t exponent)
     store.oprecords_stored_now[op] = 0;
   }
   store.exponent = exponent;
-  store.size = 1 << store.exponent;
+  store.size = 1L << store.exponent;
   store.hash_table = alloc_hash(exponent);
   store.hash_table->record_size = sizeof(struct larc_op_t);
   return 1;
 }
 
-
+/*!
+ * \ingroup larc
+ * \brief Produces a hash value from the three components of an operation
+ * \param in1_mat_ptr The pointer to the first matrix
+ * \param in2_mat_ptr The pointer to the second matrix
+ * \param op_type The enum type for the operation to be stored
+ * \return The desired hash value
+ */
 static uint64_t 
-hash_from_op(mat_add_t in1_mat_ptr, mat_add_t in2_mat_ptr, op_type_t op_type) {
+hash_from_op(mat_ptr_t in1_mat_ptr, mat_ptr_t in2_mat_ptr, op_type_t op_type) {
   uint64_t hash = recursive_hash_from_three_integers((uint64_t)in1_mat_ptr, 
                                           (uint64_t)op_type, 
                                           (uint64_t)in2_mat_ptr, 
@@ -133,13 +170,13 @@ hash_from_op(mat_add_t in1_mat_ptr, mat_add_t in2_mat_ptr, op_type_t op_type) {
  * the next available entry is found, or until the entire array has been
  * walked once (looping at the end) */
 struct larc_op_t *
-op_find(op_type_t op_type, mat_add_t in1_mat_ptr, mat_add_t in2_mat_ptr, int create_flag)
+op_find(op_type_t op_type, mat_ptr_t in1_mat_ptr, mat_ptr_t in2_mat_ptr, int create_flag)
 {
   int verbose = 0;
 
   // test to see that op_type is valid
   if (op_type == INVALID_OP) {
-    printf("in %s, attempting to find and INVALID_OP\n",__func__);
+    fprintf(stderr,"in %s, attempting to find and INVALID_OP\n",__func__);
     exit(-1);
   }
 
@@ -169,7 +206,7 @@ op_find(op_type_t op_type, mat_add_t in1_mat_ptr, mat_add_t in2_mat_ptr, int cre
     printf("In %s, returned from hash_get_chain\n",__func__);
   }
   
-  hash_node_t *last_zero_hit = NULL;
+  //hash_node_t *last_zero_hit = NULL;
   int len = 0;
   
   if (verbose) {
@@ -187,10 +224,10 @@ op_find(op_type_t op_type, mat_add_t in1_mat_ptr, mat_add_t in2_mat_ptr, int cre
   while (node_ptr)
     {
       len++;
-      op_add_t current_op_ptr = (op_add_t) (node_ptr->record_ptr);
+      op_ptr_t current_op_ptr = (op_ptr_t) (node_ptr->record_ptr);
       struct larc_op_t *op_rec_ptr = (struct larc_op_t *) current_op_ptr;
-      if (get_matrixID_from_ptr(in1_mat_ptr) == op_rec_ptr->in1_matID 
-	  && get_matrixID_from_ptr(in2_mat_ptr) == op_rec_ptr->in2_matID
+      if (get_matID_from_matPTR(in1_mat_ptr) == op_rec_ptr->in1_matID 
+	  && get_matID_from_matPTR(in2_mat_ptr) == op_rec_ptr->in2_matID
           && op_type == op_rec_ptr->op_type)
 	{
 	  store.hash_table->hits++;
@@ -199,9 +236,9 @@ op_find(op_type_t op_type, mat_add_t in1_mat_ptr, mat_add_t in2_mat_ptr, int cre
 	}
       else {
 	if (
-	    matrix_is_invalid(mat_ptr_from_matrixID(op_rec_ptr->in1_matID,"first",__func__,0))
-	    || matrix_is_invalid(mat_ptr_from_matrixID(op_rec_ptr->in2_matID,"second",__func__,0))
-	    || matrix_is_invalid(mat_ptr_from_matrixID(op_rec_ptr->out_matID,"third",__func__,0))
+	    matrix_is_invalid(get_matPTR_from_matID(op_rec_ptr->in1_matID,"first",__func__,0))
+	    || matrix_is_invalid(get_matPTR_from_matID(op_rec_ptr->in2_matID,"second",__func__,0))
+	    || matrix_is_invalid(get_matPTR_from_matID(op_rec_ptr->out_matID,"third",__func__,0))
 	    )
 	  {
 	    hash_node_remove(store.hash_table, (record_ptr_t)current_op_ptr, hash);
@@ -212,8 +249,8 @@ op_find(op_type_t op_type, mat_add_t in1_mat_ptr, mat_add_t in2_mat_ptr, int cre
 
       //  This was going to be used so that we could truncate the 
       //  end of the hash chain which would contain all nodes with zero hits
-      if (node_ptr->hits == 0)
-	last_zero_hit = node_ptr;
+      //if (node_ptr->hits == 0)
+	//last_zero_hit = node_ptr;
       
       node_ptr = node_ptr->next;
     }
@@ -251,7 +288,7 @@ op_find(op_type_t op_type, mat_add_t in1_mat_ptr, mat_add_t in2_mat_ptr, int cre
 
 
 int
-op_set(op_type_t op_type, mat_add_t in1_mat_ptr, mat_add_t in2_mat_ptr, mat_add_t out_mat_ptr)
+op_set(op_type_t op_type, mat_ptr_t in1_mat_ptr, mat_ptr_t in2_mat_ptr, mat_ptr_t out_mat_ptr)
 {
 // this function should be called whenever 
 // a) op_get has returned zero;
@@ -268,27 +305,27 @@ op_set(op_type_t op_type, mat_add_t in1_mat_ptr, mat_add_t in2_mat_ptr, mat_add_
 	struct larc_op_t *op_rec_ptr = op_find(op_type, in1_mat_ptr, in2_mat_ptr, 1);
 
         // if a new larc_op_t has been created, need to initialize it?
-	if (op_rec_ptr->in1_matID != get_matrixID_from_ptr(in1_mat_ptr) 
-	    || op_rec_ptr->in2_matID != get_matrixID_from_ptr(in2_mat_ptr)
+	if (op_rec_ptr->in1_matID != get_matID_from_matPTR(in1_mat_ptr) 
+	    || op_rec_ptr->in2_matID != get_matID_from_matPTR(in2_mat_ptr)
             || op_rec_ptr->op_type == INVALID_OP) { 
-	  op_rec_ptr->in1_matID = get_matrixID_from_ptr(in1_mat_ptr);
-	  op_rec_ptr->in2_matID = get_matrixID_from_ptr(in2_mat_ptr);
+	  op_rec_ptr->in1_matID = get_matID_from_matPTR(in1_mat_ptr);
+	  op_rec_ptr->in2_matID = get_matID_from_matPTR(in2_mat_ptr);
           op_rec_ptr->op_type = op_type;
           store.oprecords_total_created[op_type]++;
           store.oprecords_stored_now[op_type]++;
 	}
-	op_rec_ptr->out_matID = get_matrixID_from_ptr(out_mat_ptr);
+	op_rec_ptr->out_matID = get_matID_from_matPTR(out_mat_ptr);
 
 	return 0;
 }
 
-mat_add_t
-op_get(op_type_t op_type, mat_add_t in1_mat_ptr, mat_add_t in2_mat_ptr)
+mat_ptr_t
+op_get(op_type_t op_type, mat_ptr_t in1_mat_ptr, mat_ptr_t in2_mat_ptr)
 {
         // if this operation has been done before,  the
         // matrix_ptr of the result will be returned;
         // otherwise we get MATRIX_PTR_INVALID
-	mat_add_t ret_mat_ptr = MATRIX_PTR_INVALID;
+	mat_ptr_t ret_mat_ptr = MATRIX_PTR_INVALID;
 
 	if (op_type >= INVALID_OP) {
 		return ret_mat_ptr;
@@ -300,7 +337,7 @@ op_get(op_type_t op_type, mat_add_t in1_mat_ptr, mat_add_t in2_mat_ptr)
 
 	if (op_rec_ptr != NULL) {
 	  store.op_store_hits++;
-	  ret_mat_ptr = mat_ptr_from_matrixID(op_rec_ptr->out_matID, "first", __func__,0);
+	  ret_mat_ptr = get_matPTR_from_matID(op_rec_ptr->out_matID, "", __func__,0);
 	} else {
 	  store.op_store_misses++;
 	}
@@ -339,8 +376,8 @@ op_type_t get_op_type_from_string_name(char *op_name)
 int64_t op_hashID_by_matrixIDs(int64_t in1_mID, int64_t in2_mID, char *op_name)
 {
   // look up the matrix pointer corresponding to that matrixID
-  mat_add_t in1_ptr  = mat_ptr_from_matrixID(in1_mID, "first", __func__,0);
-  mat_add_t in2_ptr  = mat_ptr_from_matrixID(in2_mID, "second", __func__,0);
+  mat_ptr_t in1_ptr  = get_matPTR_from_matID(in1_mID, "first", __func__,0);
+  mat_ptr_t in2_ptr  = get_matPTR_from_matID(in2_mID, "second", __func__,0);
 
   // check to see if this matrix has already been removed from the matrix store
   if (in1_ptr == MATRIX_PTR_INVALID || in2_ptr == MATRIX_PTR_INVALID) {
@@ -351,8 +388,8 @@ int64_t op_hashID_by_matrixIDs(int64_t in1_mID, int64_t in2_mID, char *op_name)
   op_type_t op_type = get_op_type_from_string_name(op_name);
   if (op_type == INVALID_OP)
   {
-    printf("In %s: argument op_name\n\t%s\n",__func__,op_name);
-    printf(" is not a valid operation\n");
+    fprintf(stderr,"In %s: argument op_name\n\t%s\n",__func__,op_name);
+    fprintf(stderr," is not a valid operation\n");
     exit(-1);
   }
 
@@ -397,10 +434,10 @@ op_hash_chain_info_to_file(uint64_t hash, char *outfilepath, char *comment)
   hash_table_t *table_ptr = store.hash_table;
   hash_node_t *node_ptr = table_ptr->heads[hash];
   
-  op_add_t record_ptr;
+  op_ptr_t record_ptr;
   
   while (node_ptr)  { 
-    record_ptr = (op_add_t) node_ptr->record_ptr; 
+    record_ptr = (op_ptr_t) node_ptr->record_ptr; 
     
     // HEADER: "operation matrixID In_1 matrixID In_2  matrixID Out"
     uint64_t in1_mID = record_ptr->in1_matID;
@@ -436,22 +473,29 @@ op_hash_chain_info_to_screen(uint64_t hash, char *comment)
 /*************************************************************************** 
  *                   base_op_hash_clean                        *
  *   Cleans a hash chain in the op store for a given hash and op_type      *
+ *   by removing nodes with invalid matrices.                               *
  ***************************************************************************/
+/*!
+ * \ingroup larc
+ * \brief Cleans a hash chain in the op store for a given hash and op_type
+ * \param hashID Identifies the hash chain
+ * \return 1
+ */
 static int
 base_op_hash_clean(uint64_t hashID)
 {
 	hash_table_t *table_ptr = store.hash_table;
 	hash_node_t *node_ptr = table_ptr->heads[hashID];
-	op_add_t current_op_ptr;
+	op_ptr_t current_op_ptr;
 	
-	// walk throught the hash chain, removing nodes along the way if any of the 3 matrices are invalid
+	// walk through the hash chain, removing nodes along the way if any of the 3 matrices are invalid
 	while (node_ptr)  {
-		current_op_ptr = (op_add_t) node_ptr->record_ptr;
+		current_op_ptr = (op_ptr_t) node_ptr->record_ptr;
 		struct larc_op_t *op_rec_ptr = (struct larc_op_t *) current_op_ptr;
         if (
-	    matrix_is_invalid(mat_ptr_from_matrixID(op_rec_ptr->in1_matID,"first",__func__,0))
-	    || matrix_is_invalid(mat_ptr_from_matrixID(op_rec_ptr->in2_matID,"second",__func__,0))
-	    || matrix_is_invalid(mat_ptr_from_matrixID(op_rec_ptr->out_matID,"third",__func__,0))
+	    matrix_is_invalid(get_matPTR_from_matID(op_rec_ptr->in1_matID,"first",__func__,0))
+	    || matrix_is_invalid(get_matPTR_from_matID(op_rec_ptr->in2_matID,"second",__func__,0))
+	    || matrix_is_invalid(get_matPTR_from_matID(op_rec_ptr->out_matID,"third",__func__,0))
 	    )
 	    {
 			hash_node_remove(store.hash_table, (record_ptr_t)current_op_ptr, hashID);
@@ -473,13 +517,14 @@ base_op_hash_clean(uint64_t hashID)
 /*************************************************************************** 
  *                   clean_op_hash_chain                                   *
  *   Cleans a hash chain in the op store for a given hash and op_name      *
+ *   Calls base_op_hash_chain with checks.                                 *
  ***************************************************************************/
 int
 clean_op_hash_chain(uint64_t hashID)
 {
 	uint64_t max = store.size;
 	if ((hashID < 0) || (hashID >= max)) {
-		printf("Error: hash value out of range\n");
+		fprintf(stderr,"Error: hash value out of range\n");
 		return(0);
 		}
 
@@ -488,6 +533,67 @@ clean_op_hash_chain(uint64_t hashID)
 	return(1);
 }
 
+
+
+/*************************************************************************** 
+ *                   repair_op_store                                        *
+ *   cleans/repairs all hash chains in the op store                                *
+ ***************************************************************************/
+int
+clean_op_store()
+{
+    uint64_t max = store.size;
+    uint64_t hashID;
+    for (hashID = 0; hashID < max; hashID ++){
+        base_op_hash_clean(hashID);
+        // or 
+        //clean_op_hash_chain(hashID);
+    }
+    return 1;
+}
+
+
+/*************************************************************************** 
+ *                   clean_op_store                                        *
+ *   Empty all hash chains in the op store                                *
+ ***************************************************************************/
+int empty_op_store()
+{
+    uint64_t max = store.size;
+    uint64_t hashID;
+    hash_table_t *table_ptr = store.hash_table;
+    for (hashID = 0; hashID < max; hashID ++){
+	hash_node_t *node_ptr = table_ptr->heads[hashID];
+	hash_node_t *next_node_ptr;
+	op_ptr_t current_op_ptr;
+	
+	// walk through the hash chain, removing nodes along the way 
+	while (node_ptr) {
+            // save the next node - alternatively we could always set this to
+            // the head since next get's set to the head during hash_node_remove
+            next_node_ptr = node_ptr->next;
+            current_op_ptr = (op_ptr_t) node_ptr->record_ptr;
+            struct larc_op_t *op_rec_ptr = (struct larc_op_t *) current_op_ptr;
+            // remove the node that stores this record in the store
+            // but does not free the record itself
+            hash_node_remove(store.hash_table, (record_ptr_t) current_op_ptr, hashID);
+
+            // FREE RECORD FOR NODE;
+            free(op_rec_ptr);
+
+            node_ptr = next_node_ptr;
+        }
+    }
+
+    // reset counters in op store
+    store.numsets = 0;
+    store.op_store_hits = 0;
+    store.op_store_misses = 0;
+    memset(store.oprecords_total_created, 0x00, INVALID_OP + 1);
+    memset(store.oprecords_stored_now,    0x00, INVALID_OP + 1);
+
+    return 1;
+}
 
 #ifdef HASHSTATS
 /************************************************************************

@@ -1,142 +1,289 @@
-
-#################################################################
-#                                                               #
-# Copyright 2014, Institute for Defense Analyses                #
-# 4850 Mark Center Drive, Alexandria, VA; 703-845-2500          #
-# This material may be reproduced by or for the US Government   #
-# pursuant to the copyright license under the clauses at DFARS  #
-# 252.227-7013 and 252.227-7014.                                #
-#                                                               #
-# LARC : Linear Algebra via Recursive Compression               #
-# Authors:                                                      #
-#   - Steve Cuccaro (IDA-CCS)                                   #
-#   - John Daly (LPS)                                           #
-#   - John Gilbert (UCSB, IDA adjunct)                          #
-#   - Jenny Zito (IDA-CCS)                                      #
-#                                                               #
-# Additional contributors are listed in "LARCcontributors".     #
-#                                                               #
-# POC: Jennifer Zito <jszito@super.org>                         #
-# Please contact the POC before disseminating this code.        #
-#                                                               #
-#################################################################
+#!/usr/bin/env python3
 
 # NOTE: to run on command line
-#   python test_unittest_matmath.py -v
+#   python3 -m unittest -v test_unittest_matmath
+# To run individual test classes from the module, do (for example) 
+#   python3 -m unittest -v test_unittest_matmath.TestMatrixMaxnorm
+
+ ##################################################################
+ #                                                                #
+ # Copyright (C) 2014, Institute for Defense Analyses             #
+ # 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           #
+ # This material may be reproduced by or for the US Government    #
+ # pursuant to the copyright license under the clauses at DFARS   #
+ # 252.227-7013 and 252.227-7014.                                 #
+ #                                                                #
+ # LARC : Linear Algebra via Recursive Compression                #
+ # Authors:                                                       #
+ #   - Steve Cuccaro (IDA-CCS)                                    #
+ #   - John Daly (LPS)                                            #
+ #   - John Gilbert (UCSB, IDA adjunct)                           #
+ #   - Jenny Zito (IDA-CCS)                                       #
+ #                                                                #
+ # Additional contributors are listed in "LARCcontributors".      #
+ #                                                                #
+ # Questions: larc@super.org                                      #
+ #                                                                #
+ # All rights reserved.                                           #
+ #                                                                #
+ # Redistribution and use in source and binary forms, with or     #
+ # without modification, are permitted provided that the          #
+ # following conditions are met:                                  #
+ #   - Redistribution of source code must retain the above        #
+ #     copyright notice, this list of conditions and the          #
+ #     following disclaimer.                                      #
+ #   - Redistribution in binary form must reproduce the above     #
+ #     copyright notice, this list of conditions and the          #
+ #     following disclaimer in the documentation and/or other     #
+ #     materials provided with the distribution.                  #
+ #   - Neither the name of the copyright holder nor the names of  #
+ #     its contributors may be used to endorse or promote         #
+ #     products derived from this software without specific prior #
+ #     written permission.                                        #
+ #                                                                #
+ # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND         #
+ # CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,    #
+ # INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF       #
+ # MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE       #
+ # DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT HOLDER NOR        #
+ # CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,   #
+ # SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT   #
+ # NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;   #
+ # LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)       #
+ # HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN      #
+ # CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR   #
+ # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, #
+ # EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.             #
+ #                                                                #
+ ##################################################################
+
+ # This test set looks at routines in matmath.c and compares
+ # their output with an output calculated in python.
+
+from __future__ import print_function
 
 import os 
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__),"../../src"))
 from pylarc import *
-import numpy as np
 from ctypes import *
-
-import matrix_quick_build
 import random
 import unittest
 
-#class larcSetup():
-#    """
-#    In case we don't want to run initialize_larc for every test, 
-#    we build a class to save initialized values one time.
-#    """
-#    def __init__(self):
-#        initialize_larc(26,24,10,-1,-1)
-## If we decide that we don't even want to set up the matrices every time
-## a test is run, we can put all that in this larcSetup function. 
-## then put the next two lines in the setUp() function for the test. 
-## then to access a value in a test, you can do something like
-##      self.init.zeroMatID
-# to access persistent things to test from init. This is like unittest.setUpClass
-# but I don't think we have that in this python version? 
-#self.__class__.init = larcSetup()
 
-class TestMatrixMaxnorm(unittest.TestCase):
-    # Define a class variable that determines if larc initialization has been run. 
-    ClassIsSetup = False
+# Python routine to compute the complex conjugate of a number:
+def conj(val):
+    if type(val) == type(1j):
+        return val.conjugate()
+    elif type(val) == type(1.0):
+        return val
+    elif type(val) == type(1):
+        return val
+    else:
+        assert False, "Unknown value type {0} of {1}.".format(type(val), val)
+
+
+# Python routine to take matrix entry list and square each entry
+# then multiply each entry by scale_factor
+def squareEntries(entries, scale_factor):
+    return [scale_factor*(conj(entry)*entry) for entry in entries]
+
+
+# tests the matmath.c routine  matrix_entrySquared
+class TestMatrixEntrySquared(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        # in fear of memory leaks, we'll run this one per class. 
+        # with pylarc.stdout_redirected():
+        #    initialize_larc(26,24,10,-1,-1,1)
+        initialize_larc(26,24,10,-1,-1,0)  # run quiet
 
     def setUp(self):
-        #NOTE: at this point, initialize_larc is run ones per TestCase subclass. 
-        # If larc initialization has not been run yet, do it.
-        if not self.ClassIsSetup:
-            initialize_larc(26,24,10,-1,-1)
-            self.__class__.ClassIsSetup = True
-        # Define string for using in formating filenames
+        # Define string for use in formating filenames
         # (cvar is in pylarc)
-        if cvar.scalarTypeDef == 'i':
-            self.scalarType = "Integer"
-        elif cvar.scalarTypeDef == 'c':
-            self.scalarType = "Complex"
-        elif cvar.scalarTypeDef == 'r':
-            self.scalarType = "Real"
-        else:
-            raise Exception('scalarTypeDef %s was not handled.'%(cvar.scalarTypeDef,))
+        self.scalarType = cvar.scalarTypeStr
+        # set testing levels
+        self.row_level = 2
+        self.col_level = 2
+        self.val_range= [-100, 100]
+        self.sparsity = 0.3
+
+    def tearDown(self):
+        # clean the matrix store after every test
+        clean_matrix_store()
+        #clean_hash_store()
+        #clean_op_store()
+
+    def test_entrysquared_random_zeroscale(self):
+        """
+        0 * entrysquared(A) = 0 should work for random A.
+        """
+        scale_factor = 0
+        n = (2**self.row_level)*(2**self.col_level)
+
+        vals = pylarc.matrix_random_entries(self.scalarType, n, self.val_range[0], self.val_range[1], self.sparsity)
+        squared_vals = [0 for val in vals]
+
+        vals_matID = row_major_list_to_store_matrixID(pylarc.map_to_str(vals, self.scalarType), self.row_level, self.col_level, 2**self.col_level)
+        squared_vals_matID = row_major_list_to_store_matrixID(pylarc.map_to_str(squared_vals, self.scalarType), self.row_level, self.col_level, 2**self.col_level)
+        self.assertEqual(matrix_entrySquared_matrixID(vals_matID, str(scale_factor)), squared_vals_matID)
+
+    @unittest.skipIf(cvar.scalarTypeStr in ("Real", "Complex", "MPReal", "MPComplex"), "ScalarType must not be Real, Complex, MPReal or MPComplex")
+    def test_entrysquared_random_noscale(self):
+        """
+        1 * entrysquared(A) should work for random A.
+        """
+        scale_factor = 1
+        n = (2**self.row_level)*(2**self.col_level)
+
+        vals = pylarc.matrix_random_entries(self.scalarType, n, self.val_range[0], self.val_range[1], self.sparsity)
+        squared_vals = squareEntries(vals, 1)
+
+        vals_matID = row_major_list_to_store_matrixID(pylarc.map_to_str(vals, self.scalarType), self.row_level, self.col_level, 2**self.col_level)
+        squared_vals_matID = row_major_list_to_store_matrixID(pylarc.map_to_str(squared_vals, self.scalarType), self.row_level, self.col_level, 2**self.col_level)
+        squared_matID = matrix_entrySquared_matrixID(vals_matID, "1") 
+        failure_msg = "matrices displayed above"
+        if squared_matID != squared_vals_matID:
+            print("Failure in test_entrysquared_random_noscale - printing relevant matrices.")
+            print("Original matrix:")
+            print_naive_by_matID(vals_matID)
+            print("Squared (by python) matrix:")
+            print_naive_by_matID(squared_vals_matID)
+            print("Squared (by LARC) matrix:")
+            print_naive_by_matID(squared_matID)
+        self.assertEqual(squared_matID, squared_vals_matID, failure_msg)
+
+    @unittest.skipIf(cvar.scalarTypeStr in ("Real", "Complex", "MPReal", "MPComplex"), "ScalarType must not be Real, Complex, MPReal or MPComplex")
+    def test_entrysquared_random_scale(self):
+        """
+        s * entrysquared(A) should work for random A.
+        """
+        scale_factor = pylarc.matrix_random_entry(self.scalarType, -10, 10)
+        n = (2**self.row_level)*(2**self.col_level)
+
+        vals = pylarc.matrix_random_entries(self.scalarType, n, self.val_range[0], self.val_range[1], self.sparsity)
+        squared_vals = squareEntries(vals, scale_factor)
+
+        vals_matID = row_major_list_to_store_matrixID(pylarc.map_to_str(vals, self.scalarType), self.row_level, self.col_level, 2**self.col_level)
+        squared_vals_matID = row_major_list_to_store_matrixID(pylarc.map_to_str(squared_vals, self.scalarType), self.row_level, self.col_level, 2**self.col_level)
+        squared_matID = matrix_entrySquared_matrixID(vals_matID, pylarc.value_to_string(scale_factor, self.scalarType))
+        failure_msg = "matrices displayed above"
+        if squared_matID != squared_vals_matID:
+            print("Failure in test_entrysquared_random_scale - printing relevant matrices.")
+            print("Scale factor: {0} ({1})".format(scale_factor, scale_factor.hex()))
+            print("Original matrix:")
+            print_naive_by_matID(vals_matID)
+            print("Squared (by python) matrix:")
+            print_naive_by_matID(squared_vals_matID)
+            print("Squared (by LARC) matrix:")
+            print_naive_by_matID(squared_matID)
+        self.assertEqual(squared_matID, squared_vals_matID, failure_msg)
+
+
+class TestMatrixMaxnorm(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        # in fear of memory leaks, we'll run this one per class. 
+        # with pylarc.stdout_redirected():
+        #    initialize_larc(26,24,10,-1,-1,1)
+        initialize_larc(26,24,10,-1,-1,0)  # run quiet
+
+    def setUp(self):
+        # Define string for use in formating filenames
+        # (cvar is in pylarc)
+        self.scalarType = cvar.scalarTypeStr
         # set testing levels
         self.row_level = 3
         self.col_level = 3
         self.val_range= [-100, 100]
         self.sparsity = 0.3
-        # build Zero matrix
-        self.zeroMatID = matrix_quick_build.matrix_zero_matrixID(self.row_level, self.col_level)
-        # generate random matrix
-        self.randMatAID = matrix_quick_build.matrix_random_matrixID(self.scalarType, self.row_level, self.col_level, self.val_range[0], self.val_range[1], self.sparsity)
-        # build -1
-        self.neg1 = matrix_get_matrixID_from_scalar(-1)
+
+    def tearDown(self):
+        # clean the matrix store after every test
+        clean_matrix_store()
+        #clean_hash_store()
+        #clean_op_store()
 
     def test_maxnorm_zero(self):
         """
         maxnorm(0) = 0
         """
-        self.assertEqual(matrix_maxnorm_matrixID(self.zeroMatID), 0)
+        ## grab Zero matrix
+        zeroMatID = pylarc.get_zero_matrixID(self.row_level, self.col_level)
+        maxnorm = matrix_maxnorm_matrixID(zeroMatID)
+        if self.scalarType in ("Complex", "MPRatComplex", "MPComplex"):
+            maxnorm = sum(map(float, maxnorm.split("+I*")))
+        else:
+            maxnorm = float(maxnorm)
+        self.assertEqual(maxnorm, 0)
 
     def test_maxnorm_id(self):
         """
-        maxnorm(id) = id
+        maxnorm(id) = 1
         """
-        idMatID = matrix_quick_build.matrix_identity_matrixID(self.row_level)
-        self.assertEqual(matrix_maxnorm_matrixID(idMatID), 1)
+        idMatID = pylarc.get_identity_matrixID(self.row_level)
+        maxnorm = matrix_maxnorm_matrixID(idMatID)
+        if self.scalarType in ("Complex", "MPRatComplex", "MPComplex"):
+            maxnorm = sum(map(float, maxnorm.split("+I*")))
+        else:
+            maxnorm = float(maxnorm)
+        self.assertEqual(maxnorm, 1)
 
     def test_maxnorm_negated(self):
         """
         maxnorm(-A) = maxnorm(A)
         """
-        negAMatID = scalar_mult_matrixID(self.neg1, self.randMatAID)
-        self.assertEqual(matrix_maxnorm_matrixID(self.randMatAID), matrix_maxnorm_matrixID(negAMatID))
+        # build -1
+        neg1 = get_valID_from_valString("-1")
+        # generate random matrix
+        randMatAID = pylarc.matrix_random_matrixID(self.scalarType, self.row_level, self.col_level, self.val_range[0], self.val_range[1], self.sparsity)
+        negAMatID = scalar_mult_matrixID(neg1, randMatAID)
+        self.assertEqual(matrix_maxnorm_matrixID(randMatAID), matrix_maxnorm_matrixID(negAMatID))
 
-    def test_maxnorm_scalar(self):
+    def test_maxnorm_random(self):
         """
-        maxnorm(scalar) = abs(scalar)
+        placing != entry 5 in zero matrix to make A
+        maxnorm(A) = 5
         """
-        scalMatID = matrix_quick_build.matrix_random_matrixID(self.scalarType, 0, 0, self.val_range[0], self.val_range[1])
-        norm = abs(matrix_trace_matrixID(scalMatID))
-        self.assertEqual(matrix_maxnorm_matrixID(scalMatID), norm)
+        # get a zero matrix and place a 5 some where in the matrix
+        zeroMatID = pylarc.get_zero_matrixID(self.row_level, self.col_level)
+        # TO BE VERY CONFUSING we need an (i,j) index in the matrix we use:
+        # for i: we know row_level <= 2^row_level so the index i=self.row_level is a valid row index
+        # for j: we know col_level <= 2^col_level so the index j=self.col_level is a valid col index
+        matAID = get_matID_from_oldMatID_newValString_and_coords(zeroMatID, self.row_level, self.col_level, "5");
+        maxnorm = matrix_maxnorm_matrixID(matAID)
+        if self.scalarType in ("Complex", "MPRatComplex", "MPComplex"):
+            maxnorm = sum(map(float, maxnorm.split("+I*")))
+        else:
+            maxnorm = float(maxnorm)
+        self.assertEqual(maxnorm, 5)
 
 
 class TestMatrixSparsity(unittest.TestCase):
-    # Define a class variable that determines if larc initialization has been run. 
-    ClassIsSetup = False
+
+    @classmethod
+    def setUpClass(cls):
+        # in fear of memory leaks, we'll run this one per class. 
+        # with pylarc.stdout_redirected():
+        #    initialize_larc(26,24,10,-1,-1,1)
+        initialize_larc(26,24,10,-1,-1,0)  # run quiet
 
     def setUp(self):
-        #NOTE: at this point, initialize_larc is run ones per TestCase subclass. 
-        # If larc initialization has not been run yet, do it.
-        if not self.ClassIsSetup:
-            print "\n"
-            initialize_larc(26,24,10,-1,-1)
-            self.__class__.ClassIsSetup = True
         # Define string for using in formating filenames
         # (cvar is in pylarc)
-        if cvar.scalarTypeDef == 'i':
-            self.scalarType = "Integer"
-        elif cvar.scalarTypeDef == 'c':
-            self.scalarType = "Complex"
-        elif cvar.scalarTypeDef == 'r':
-            self.scalarType = "Real"
-        else:
-            raise Exception('scalarTypeDef %s was not handled.'%(cvar.scalarTypeDef,))
+        self.scalarType = cvar.scalarTypeStr
         # set testing levels
         self.row_level = 3
         self.col_level = 3
         self.val_range= [-100, 100]
+
+    def tearDown(self):
+        # clean the matrix store after every test
+        clean_matrix_store()
+        #clean_hash_store()
+        #clean_op_store()
 
     def test_sparse_val(self):
         """
@@ -144,67 +291,66 @@ class TestMatrixSparsity(unittest.TestCase):
         """
         sparsity = 0
         n = (2**self.row_level)*(2**self.col_level)
+        # get a nonzero random sparsity
         while sparsity == 0:
             sparsity = random.random()
-        randMatID = matrix_quick_build.matrix_random_matrixID(self.scalarType, self.row_level, self.col_level, self.val_range[0], self.val_range[1], sparsity)
+        randMatID = pylarc.matrix_random_matrixID(self.scalarType, self.row_level, self.col_level, self.val_range[0], self.val_range[1], sparsity)
         # convert to number of zeros
         # requested sparsity may be inaccurate by less than one zero 
-        self.assertEqual(int(round(sparsity * n)), int(round(matrix_sparsity_matrixID(randMatID)*n)))
+        self.assertEqual(int(round(sparsity * n)), int(matrix_count_entries_matrixID(randMatID, "0")))
 
-    def test_sparse_1(self):
+    def test_sparse_0(self):
         """
         Matrix generated with sparcity value 0 has sparsity 0.
         """
-        onesMatID = matrix_quick_build.matrix_random_matrixID(self.scalarType, self.row_level, self.col_level, 1, 2, 0)
-        self.assertEqual(matrix_sparsity_matrixID(onesMatID), 0)
+        onesMatID = pylarc.matrix_random_matrixID(self.scalarType, self.row_level, self.col_level, 1, 2, 0)
+        self.assertEqual(int(matrix_count_entries_matrixID(onesMatID, "0")), 0)
 
     def test_sparse_id(self):
         """
         Identity matrix of order n has sparsity (n-1)/n.
         """
-        idMatID = matrix_quick_build.matrix_identity_matrixID(self.row_level)
-        self.assertEqual(matrix_sparsity_matrixID(idMatID), (2**self.row_level-1.0)/(2**self.row_level))
+        idMatID = pylarc.get_identity_matrixID(self.row_level)
+        self.assertEqual(int(matrix_count_entries_matrixID(idMatID, "0")), (2**self.row_level-1)*(2**self.row_level))
 
-    def test_sparse_0(self):
+    def test_sparse_0_mat(self):
         """
         Zero matrix has sparsity 0.
         """
-        zeroMatID = matrix_quick_build.matrix_zero_matrixID(self.row_level, self.col_level)
-        self.assertEqual(matrix_sparsity_matrixID(zeroMatID), 1)
+        zeroMatID = pylarc.get_zero_matrixID(self.row_level, self.col_level)
+        self.assertEqual(int(matrix_count_entries_matrixID(zeroMatID, "0")), (2**self.row_level) * (2**self.col_level))
 
 class TestMatrixSum(unittest.TestCase):
-    # Define a class variable that determines if larc initialization has been run. 
-    ClassIsSetup = False
+
+    @classmethod
+    def setUpClass(cls):
+        # in fear of memory leaks, we'll run this one per class. 
+        # with pylarc.stdout_redirected():
+        #    initialize_larc(26,24,10,-1,-1,1)
+        initialize_larc(26,24,10,-1,-1,0)  # run quiet
 
     def setUp(self):
-        #NOTE: at this point, initialize_larc is run ones per TestCase subclass. 
-        # If larc initialization has not been run yet, do it.
-        if not self.ClassIsSetup:
-            print "\n"
-            initialize_larc(26,24,10,-1,-1)
-            self.__class__.ClassIsSetup = True
         # Define string for using in formating filenames
         # (cvar is in pylarc)
-        if cvar.scalarTypeDef == 'i':
-            self.scalarType = "Integer"
-        elif cvar.scalarTypeDef == 'c':
-            self.scalarType = "Complex"
-        elif cvar.scalarTypeDef == 'r':
-            self.scalarType = "Real"
-        else:
-            raise Exception('scalarTypeDef %s was not handled.'%(cvar.scalarTypeDef,))
+        self.scalarType = cvar.scalarTypeStr
         # set testing levels
         self.row_level = 3
         self.col_level = 3
         self.val_range= [-100, 100]
         self.sparsity = .3
-        # build Zero matrix
-        self.zeroMatID = matrix_quick_build.matrix_zero_matrixID(self.row_level, self.col_level)
+        # get Zero matrix
+        self.zeroMatID = pylarc.get_zero_matrixID(self.row_level, self.col_level)
         # generate two random matrices of same size
-        self.randMatAID = matrix_quick_build.matrix_random_matrixID(self.scalarType, self.row_level, self.col_level, self.val_range[0], self.val_range[1], self.sparsity)
-        self.randMatBID = matrix_quick_build.matrix_random_matrixID(self.scalarType, self.row_level, self.col_level, self.val_range[0], self.val_range[1], self.sparsity)
+        self.randMatAID = pylarc.matrix_random_matrixID(self.scalarType, self.row_level, self.col_level, self.val_range[0], self.val_range[1], self.sparsity)
+        self.randMatBID = pylarc.matrix_random_matrixID(self.scalarType, self.row_level, self.col_level, self.val_range[0], self.val_range[1], self.sparsity)
         # build -1
-        self.neg1 = matrix_get_matrixID_from_scalar(-1)
+        self.neg1 = get_valID_from_valString("-1")
+
+    def tearDown(self):
+        # clean the matrix store after every test
+        clean_matrix_store()
+        #clean_hash_store()
+        #clean_op_store()
 
     def test_add_additive_inverse(self):
         """
@@ -223,7 +369,7 @@ class TestMatrixSum(unittest.TestCase):
         """
         A + A = 2A
         """
-        scalMatID = matrix_get_matrixID_from_scalar(2)
+        scalMatID = get_valID_from_valString("2")
         prodMatID = scalar_mult_matrixID(scalMatID, self.randMatAID)
         self.assertEqual(matrix_add_matrixID(self.randMatAID, self.randMatAID), prodMatID)
 
@@ -239,10 +385,6 @@ class TestMatrixSum(unittest.TestCase):
         """
         If A+B in op store, calculating B+A shouldn't require additional calculations.
         """
-        #NOTE: this requires a reset of the store to test properly
-        # if we decide to run setUp everywhere with tearDowns, remove next line. 
-        self.__class__.ClassIsSetup = False
-        self.setUp()
         a = matrix_add_matrixID(self.randMatAID, self.randMatBID)
         num_matrices_made = num_matrices_created()
         b = matrix_add_matrixID(self.randMatBID, self.randMatAID)
@@ -250,41 +392,37 @@ class TestMatrixSum(unittest.TestCase):
         self.assertEqual(num_matrices_made, num_matrices_made2)
 
 
-
-
 class TestMatrixDifference(unittest.TestCase):
-    # Define a class variable that determines if larc initialization has been run. 
-    ClassIsSetup = False
+
+    @classmethod
+    def setUpClass(cls):
+        # in fear of memory leaks, we'll run this one per class. 
+        # with pylarc.stdout_redirected():
+        #    initialize_larc(26,24,10,-1,-1,1)
+        initialize_larc(26,24,10,-1,-1,0)  # run quiet
 
     def setUp(self):
-        #NOTE: at this point, initialize_larc is run ones per TestCase subclass. 
-        # If larc initialization has not been run yet, do it.
-        if not self.ClassIsSetup:
-            print "\n"
-            initialize_larc(26,24,10,-1,-1)
-            self.__class__.ClassIsSetup = True
         # Define string for using in formating filenames
         # (cvar is in pylarc)
-        if cvar.scalarTypeDef == 'i':
-            self.scalarType = "Integer"
-        elif cvar.scalarTypeDef == 'c':
-            self.scalarType = "Complex"
-        elif cvar.scalarTypeDef == 'r':
-            self.scalarType = "Real"
-        else:
-            raise Exception('scalarTypeDef %s was not handled.'%(cvar.scalarTypeDef,))
+        self.scalarType = cvar.scalarTypeStr
         # set testing levels
         self.row_level = 3
         self.col_level = 3
         self.val_range= [-100, 100]
         self.sparsity = .3
-        # build Zero matrix
-        self.zeroMatID = matrix_quick_build.matrix_zero_matrixID(self.row_level, self.col_level)
+        # get a Zero matrix
+        self.zeroMatID = pylarc.get_zero_matrixID(self.row_level, self.col_level)
         # generate two random matrices of same size
-        self.randMatAID = matrix_quick_build.matrix_random_matrixID(self.scalarType, self.row_level, self.col_level, self.val_range[0], self.val_range[1], self.sparsity)
-        self.randMatBID = matrix_quick_build.matrix_random_matrixID(self.scalarType, self.row_level, self.col_level, self.val_range[0], self.val_range[1], self.sparsity)
+        self.randMatAID = pylarc.matrix_random_matrixID(self.scalarType, self.row_level, self.col_level, self.val_range[0], self.val_range[1], self.sparsity)
+        self.randMatBID = pylarc.matrix_random_matrixID(self.scalarType, self.row_level, self.col_level, self.val_range[0], self.val_range[1], self.sparsity)
         # build -1
-        self.neg1 = matrix_get_matrixID_from_scalar(-1)
+        self.neg1 = get_valID_from_valString("-1")
+
+    def tearDown(self):
+        # clean the matrix store after every test
+        clean_matrix_store()
+        #clean_hash_store()
+        #clean_op_store()
 
     def test_diff_additive_inverse(self):
         """
@@ -320,19 +458,143 @@ class TestMatrixDifference(unittest.TestCase):
         b = matrix_diff_matrixID(self.randMatBID, self.randMatAID)
         self.assertEqual(a, scalar_mult_matrixID(self.neg1, b))
 
-    ##TODO we want to catch a failure here, but instead we get a system exit. 
-    #we could intentionally skip the test but not in python 2.6. 
-    #@unittest.skip("not supported") # *.skip is python 2.7 and above
-    #def test_diff_size_mismatch(self):
-    #    """
-    #    Fail if size mismatch.
-    #    """
-    #    # generate matrix with one less row
-    #    randMatCID = matrix_quick_build.matrix_random_matrixID(self.scalarType, self.row_level-1, self.col_level, self.val_range[0], self.val_range[1], self.sparsity)
-    #    # generate matrix with one less col
-    #    randMatCID = matrix_quick_build.matrix_random_matrixID(self.scalarType, self.row_level-1, self.col_level, self.val_range[0], self.val_range[1], self.sparsity)
-    #    #with self.assertRaises(
-    #    self.assertEqual(self.randMatAID, matrix_diff_matrixID(self.randMatAID, randMatCID))
+    @unittest.skip("not supported") # *.skip is python 2.7 and above
+    def test_diff_size_mismatch(self):
+        """
+        Fail if size mismatch.
+        """
+        # generate matrix with one less row
+        randMatCID = pylarc.matrix_random_matrixID(self.scalarType, self.row_level-1, self.col_level, self.val_range[0], self.val_range[1], self.sparsity)
+        # generate matrix with one less col
+        randMatCID = pylarc.matrix_random_matrixID(self.scalarType, self.row_level-1, self.col_level, self.val_range[0], self.val_range[1], self.sparsity)
+        # could try using self.assertRaises() to show an exception is raised
+        self.assertEqual(self.randMatAID, matrix_diff_matrixID(self.randMatAID, randMatCID))
+
+
+class TestMatrixQuotient(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        # in fear of memory leaks, we'll run this one per class. 
+        # with pylarc.stdout_redirected():
+        #    initialize_larc(26,24,10,-1,-1,1)
+        initialize_larc(26,24,10,-1,-1,0)  # run quiet
+
+    def setUp(self):
+        # Define string for using in formating filenames
+        # (cvar is in pylarc)
+        self.scalarType = cvar.scalarTypeStr
+
+        # Choose non-zero value
+        if self.scalarType in ("Complex", "MPComplex",):
+            self.nz_value_str = "1.7384043-I*3.2171"
+        elif self.scalarType in ("MPRatComplex",):
+            self.nz_value_str = "348734/4457457-I*48484/55341"
+        elif self.scalarType in ("Real", "MPReal",):
+            self.nz_value_str = "1.7384043"
+        elif self.scalarType in ("MPRational",):
+            self.nz_value_str = "348734/4457457"
+        elif self.scalarType in ("Integer",):
+            self.nz_value_str = "348734"
+        elif self.scalarType in ("MPInteger",):
+            self.nz_value_str = "-34847385924385794875999277366366478588861875091875757281766734"
+        else:
+            self.nz_value_str = "0"
+
+        self.nzID = get_valID_from_valString(self.nz_value_str)
+
+    def tearDown(self):
+        # clean the matrix store after every test
+        clean_matrix_store()
+        #clean_hash_store()
+        #clean_op_store()
+
+    def test_one(self):
+        mat34 = pylarc.matrix_constant_entry_matrixID(self.nz_value_str, 3, 4)
+        one34 = pylarc.matrix_constant_entry_matrixID("1", 3, 4)
+        ans34 = scalar_divide_matrixID(mat34, self.nzID)
+        self.assertEqual(ans34, one34)
+
+    def test_two(self):
+        mat00 = pylarc.matrix_constant_entry_matrixID(self.nz_value_str, 0, 0)
+        one00 = pylarc.matrix_constant_entry_matrixID("1", 0, 0)
+        ans00 = scalar_divide_matrixID(mat00, self.nzID)
+        self.assertEqual(ans00, one00)
+
+    def test_three(self):
+        mat22 = pylarc.matrix_constant_entry_matrixID(self.nz_value_str, 2, 2)
+        one22 = pylarc.matrix_constant_entry_matrixID("1", 2, 2)
+        ans22 = scalar_divide_matrixID(mat22, self.nzID)
+        self.assertEqual(ans22, one22)
+
+
+class TestMatrixValueCount(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        # in fear of memory leaks, we'll run this one per class. 
+        # with pylarc.stdout_redirected():
+        #    initialize_larc(26,24,10,-1,-1,1)
+        initialize_larc(26,24,10,-1,-1,0)  # run quiet
+
+    def setUp(self):
+        # Define string for using in formating filenames
+        # (cvar is in pylarc)
+        self.scalarType = cvar.scalarTypeStr
+        # set testing levels
+        self.row_level = 3
+        self.col_level = 3
+        self.val_range= [-100, 100]
+        self.sparsity = .3
+
+    def tearDown(self):
+        # clean the matrix store after every test
+        clean_matrix_store()
+        #clean_hash_store()
+        #clean_op_store()
+
+    def test_count0_sparsity_rand(self):
+        """
+        Verify count0(A) = sparsity*size value for generating random matrix A. 
+        """
+        sparsity = 0
+        n = (2**self.row_level)*(2**self.col_level)
+        # get a nonzero random sparsity
+        while sparsity == 0:
+            sparsity = random.random()
+        randMatID = pylarc.matrix_random_matrixID(self.scalarType, self.row_level, self.col_level, self.val_range[0], self.val_range[1], sparsity)
+        # convert to number of zeros
+        # requested sparsity may be inaccurate by less than one zero 
+        self.assertEqual(int(round(sparsity * n)), int(matrix_count_entries_matrixID(randMatID, "0")))
+
+    def test_count0_sparse_0(self):
+        """
+        Matrix generated with sparcity value 0 has 0 zero entries.
+        """
+        onesMatID = pylarc.matrix_random_matrixID(self.scalarType, self.row_level, self.col_level, 1, 2, 0)
+        self.assertEqual(0, int(matrix_count_entries_matrixID(onesMatID, "0")))
+
+    def test_count0_id_mat(self):
+        """
+        nxn identiy matrix has n^2 - n zeros.
+        """
+        idMatID = pylarc.get_identity_matrixID(self.row_level)
+        self.assertEqual(int(matrix_count_entries_matrixID(idMatID, "0")), ((2**self.row_level) - 1)*(2**self.row_level))
+
+    def test_count1_id_mat(self):
+        """
+        nxn identiy matrix n ones.
+        """
+        idMatID = pylarc.get_identity_matrixID(self.row_level)
+        self.assertEqual(int(matrix_count_entries_matrixID(idMatID, "1")), 2**self.row_level)
+
+    def test_count0_0_mat(self):
+        """
+        nxn zero matrix has n^2 zeros.
+        """
+        n = (2**self.row_level)*(2**self.col_level);
+        zeroMatID = pylarc.get_zero_matrixID(self.row_level, self.col_level)
+        self.assertEqual(n, int(matrix_count_entries_matrixID(zeroMatID, "0")))
 
 
 #needed for python 2.6 (without unittest2)

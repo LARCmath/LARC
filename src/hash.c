@@ -4,7 +4,7 @@
 //     for the Matrix Store and the matrix operation stores                                        
 /******************************************************************
  *                                                                *
- * Copyright 2014, Institute for Defense Analyses                 *
+ * Copyright (C) 2014, Institute for Defense Analyses             *
  * 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           *
  * This material may be reproduced by or for the US Government    *
  * pursuant to the copyright license under the clauses at DFARS   *
@@ -19,8 +19,38 @@
  *                                                                *
  * Additional contributors are listed in "LARCcontributors".      *
  *                                                                *
- * POC: Jennifer Zito <jszito@super.org>                          *
- * Please contact the POC before disseminating this code.         *
+ * Questions: larc@super.org                                      *
+ *                                                                *
+ * All rights reserved.                                           *
+ *                                                                *
+ * Redistribution and use in source and binary forms, with or     *
+ * without modification, are permitted provided that the          *
+ * following conditions are met:                                  *
+ *   - Redistribution of source code must retain the above        *
+ *     copyright notice, this list of conditions and the          *
+ *     following disclaimer.                                      *
+ *   - Redistribution in binary form must reproduce the above     *
+ *     copyright notice, this list of conditions and the          *
+ *     following disclaimer in the documentation and/or other     *
+ *     materials provided with the distribution.                  *
+ *   - Neither the name of the copyright holder nor the names of  *
+ *     its contributors may be used to endorse or promote         *
+ *     products derived from this software without specific prior *
+ *     written permission.                                        *
+ *                                                                *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND         *
+ * CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,    *
+ * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF       *
+ * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE       *
+ * DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT HOLDER NOR        *
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,   *
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT   *
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;   *
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)       *
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN      *
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR   *
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, *
+ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.             *
  *                                                                *
  *****************************************************************/
 
@@ -33,14 +63,16 @@
 
 // Our header files structures and functions
 #include "larc.h"
+#include "scalars.h"
 #include "hash.h"
+#include "global.h"
 
 
 /******************************************************************
  * BACKGROUND:
  *  The Matrix Store stores matrices in a Matrix Table which uses
  *  for a unique matrixID the integer valued index of the row 
- *  in which the matrix is stored of the Matrix Table (mat_add_t).
+ *  in which the matrix is stored of the Matrix Table (mat_ptr_t).
  *  Having this as an integer allows check pointing and storage of tables.
  *
  *  The hashes provide a fast front end for storage and retrieval
@@ -62,125 +94,11 @@
  *  (and a place saver) for single argument functions like Conjugation
  *  (which has an option to be stored in a table and an option to
  *  be stored in the matrix table), Conjugation, and Adjoint.
- *  Trace is handled differently since it's output is a ScalarType
+ *  Trace is handled differently since it's output is a scalarType
  *  number instead of a matrixID
  *******************************************************************/
 
 
-/***************************************************************
- *    mult_golden_hash       
- *    Author: Jenny Zito
- *      Takes in a 64 bit unsigned integer and the exponent for hash table
- *      returns a hash value  between 0 and 2^exponent-1.
- *      The method is based on the multiplicative hash
- *      described in Knuth Vol 3 which uses the golden mean.
- *      The trick is to try to get a full 64 bits to right of decimal.
- *      A straight-forward (but faulty) implementation would only
- *      have 56 bits of entropy from the double golden ratio.
- *      Also see p. 263 multiplicative hash in Corman, Leiserson Rivest and Steine
- *      To get around this we created golden_big_int which contains
- *      the fractional part of the golden mean shifted into a 64-bit
- *      integer. Bill Carlson helped me get the double precision number
- *      for the integer portion of 2^64 * (sqrt(5)-1)/2 using gp calculator.
- *      The magic constant here is ^^^^^^^^^^^^^^^^^^^^ that, equal to
- *      11400714819323198485ULL.
- *****************************************************************/
-static inline uint64_t
-mult_golden_hash(uint64_t key, uint64_t exponent)
-{
-	return (11400714819323198485ULL * key) >> (64 - exponent);
-
-}
-
-#ifdef USE_COMPLEX
-/***************************************************************
- *    Author: Jenny Zito
- *         This converts entropy of doubles into integers, 
- *         then circularly shifts the second integer and mod 2
- *         adds it to the first to get a 64 bit integer to send
- *         to the mult_golden_hash function for hashing
- *         A constant, the "double salt" is added to prevent simple collisions
- *         with real vs. imaginary and with the hash from four integers. 
- ****************************************************************/
-static uint64_t
-hash_from_two_doubles (double d1, double d2, uint64_t exponent)
-{
-
-  uint64_t int1, int2; 
-
-  // ensure that we aren't dealing with a negative zero
-  if (fpclassify(d1) == FP_ZERO) d1 = 0.0;
-  if (fpclassify(d2) == FP_ZERO) d2 = 0.0;
-
-  // interpret the bits in each double of the complex number to be an integer
-  // int1 = *((uint64_t*)&d1);
-  // int2 = *((uint64_t*)&d2);
-  memcpy((void *) &int1, (void *) &d1, sizeof(int1));
-  memcpy((void *) &int2, (void *) &d2, sizeof(int1));
-  
-
-  // circularly shift the second integer and mod 2 add it to the first integer
-  //
-  // Add in the "double salt", which I selected to be:
-  // The integer part of 2^64 * (exp(1)-2)
-  // Using the double precision calculator gp:
-  //   gp
-  //   ? exp(1)
-  //   %1  = 2.7182818284590452353602874713526624978
-  //   ?  2^64 * (exp(1)-2)
-  //   %2 = 13249961062380153450.747823268317876541
-  // Thus we set
-  //   uint64_t int_salt_from_e = 13249961062380153450ULL;
-  // And add this value to the imaginary part of the integer from the 
-  // imaginary part of the complex value.  Then  we circularly shift the
-  // sum 32 bits and add it to the originals.
-  //
-  // 1. This keeps simple combinations of imag, real from colliding with each other 
-  //    e.g. 0+ 1i would collide with 2^32 + 0i
-  // 2. This keeps simple inputs of the four-integers hash from colliding with 
-  //    simple inputs of the two-doubles hash 
-  //    e.g. 0 + 0i   would collide with (0,0,0,0)
-
-
-  /**************************************************************
-   *   jszito 11/2017 Replacing this code with                  *
-   *   my recursive golden multiply hash                        *
-   *   recursive_hash_from_two_integers                          *
-   **************************************************************/
-  // uint64_t shifted_sum = int1 ^ (int2 >> 32) ^ (int2 << 32);   
-  // uint64_t int_salt_from_e = 13249961062380153450ULL;          
-  // uint64_t result = shifted_sum ^ int_salt_from_e;             
-  // return mult_golden_hash(result, exponent);                   
-
-  return recursive_hash_from_two_integers(int1,int2,exponent);  
-
-
-}
-#endif
-
-#ifdef USE_REAL
-/***************************************************************
- *    hash_from_one_double         (called by hash_from_matrix_content)
- *    Author: Jenny Zito and Laurie Law
- *         This converts entropy of a double into an integer and
- *         pass it to the mult_golden_hash function for hashing
- ****************************************************************/
-static uint64_t
-hash_from_one_double (double doub, uint64_t exponent)
-{
-
-  uint64_t int_of_doub; 
-
-  // ensure that we aren't dealing with a negative zero
-  if (fpclassify(doub) == FP_ZERO) doub = 0.0;
-
-  // interpret the bits of the double to be an integer
-  // int_of_doub = *((uint64_t*)&doub);
-  memcpy((void *) &int_of_doub, (void *) &doub, sizeof(int_of_doub));
-
-  return mult_golden_hash(int_of_doub, exponent);
-}
-#endif
 
 
 // NON SCALAR
@@ -191,31 +109,32 @@ hash_from_one_double (double doub, uint64_t exponent)
  *    Jenny, Steve rewrote this in Nov 2016 to handle part of 
  *        hash_from_matrix_content
  ****************************************************************/
+
 uint64_t
-hash_from_matrix_panel(mat_add_t sub[4], matrix_type_t mat_type, uint64_t exponent)
+hash_from_matrix_panel(mat_ptr_t sub[4], matrix_type_t mat_type, uint64_t exponent)
 {
 
 #ifdef DEBUG
   printf("In routine %s\n",__func__);
-  printf("     The hash exponent is %d\n",exponent);
+  printf("     The hash exponent is %ld\n",exponent);
 #endif
 
   // EXCEPTION CHECKING
   if(mat_type==SCALAR) {   
-    printf("In hash_from_matrix_panel mat_type was SCALAR\n");
+    fprintf(stderr,"In hash_from_matrix_panel mat_type was SCALAR\n");
     exit(1);
   }   
 
-  // sub is 4  mat_add_t corresponding to the four submatrices
+  // sub is 4  mat_ptr_t corresponding to the four submatrices
 #ifdef DEBUG
-  printf("     sub = [%d , %d , %d , %d]\n",
+  printf("     sub = [%ld , %ld , %ld , %ld]\n",
 	 (uint64_t)sub[0], (uint64_t)sub[1], (uint64_t)sub[2], (uint64_t)sub[3]);
 #endif
 
 #ifdef DEBUG
   // DEBUGGING
-    printf("IN HASH FROM MATRIX PANEL: List of addresses = [%d , %d , %d , %d]\n",	(uint64_t)sub[0], (uint64_t)sub[1], (uint64_t)sub[2], (uint64_t)sub[3]);
-    printf("  MOD 64  = [%d , %d , %d , %d]\n",	(uint64_t)sub[0]%64, (uint64_t)sub[1]%64, (uint64_t)sub[2]%64, (uint64_t)sub[3]%64);
+    printf("IN HASH FROM MATRIX PANEL: List of addresses = [%ld , %ld , %ld , %ld]\n",	(uint64_t)sub[0], (uint64_t)sub[1], (uint64_t)sub[2], (uint64_t)sub[3]);
+    printf("  MOD 64  = [%ld , %ld , %ld , %ld]\n",	(uint64_t)sub[0]%64, (uint64_t)sub[1]%64, (uint64_t)sub[2]%64, (uint64_t)sub[3]%64);
 #endif
 
     return recursive_hash_from_four_integers(
@@ -228,10 +147,10 @@ hash_from_matrix_panel(mat_add_t sub[4], matrix_type_t mat_type, uint64_t expone
   // Experiment with using matrixIDs instead of matrixPTRs
     /*
     return recursive_hash_from_four_integers(  
-                                 get_matrixID_from_ptr(sub[0]), 
-                                 get_matrixID_from_ptr(sub[1]), 
-                                 get_matrixID_from_ptr(sub[2]), 
-                                 get_matrixID_from_ptr(sub[3]),
+                                 get_matID_from_matPTR(sub[0]), 
+                                 get_matID_from_matPTR(sub[1]), 
+                                 get_matID_from_matPTR(sub[2]), 
+                                 get_matID_from_matPTR(sub[3]),
                                  exponent);
     */
 
@@ -250,54 +169,43 @@ hash_from_matrix_panel(mat_add_t sub[4], matrix_type_t mat_type, uint64_t expone
  *        than zerorealthresh to zero.
  *    Steve and Jenny modified in Nov 2016 to handle scalar functionality
  *        of old function hash_from_matrix_content
+ *    Andy modified in Jun 2018 to apply to general scalarType.
  ****************************************************************/
+
 uint64_t
-hash_from_matrix_scalar(ScalarType scalar, matrix_type_t mat_type, uint64_t exponent)
+hash_from_matrix_scalar(scalarType scalar, matrix_type_t mat_type, uint64_t exponent)
 {
   
 #ifdef DEBUG
   printf("In routine %s\n",__func__);
-  printf("     The hash exponent is %d\n",exponent);
+  printf("     The hash exponent is %" PRIu64 "\n",exponent);
 #endif
   
   // EXCEPTION CHECKING
-  if(mat_type != SCALAR) {   // begin SCALAR TYPE
-    printf("In hash_from_matrix_scalar mat_type was not SCALAR\n");
+  if(mat_type != SCALAR) {  
+    fprintf(stderr,"In hash_from_matrix_scalar mat_type was not SCALAR\n");
     exit(1);
   }   
   
-#ifdef DEBUG
-#ifdef USE_COMPLEX  // mat_val_ptr is a complex number
-  printf("    scalar = [%g , %g]\n",creal(scalar),cimag(scalar));
-#else
-  printf("     mat_val_ptr = [%g]\n",scalar);
-#endif
-#endif
-  
-  // hash any items with same locality_approximation to the same hash location
-  ScalarType marker = locality_approx(scalar);
+  // The neighborhood approximation or locality approximation are
+  // two names we have used interchangeably in LARC
+  // marker is assigned to be the nbhd approx of the scalar
+  // we will use this to hash all scalars with same nbhd_approx to same chain
+  scalarType *marker = &scratchVars.approx_value;
+  sca_nbhd_approx(marker, scalar);
   
 #ifdef DEBUG
-  // The %la prints a double in hex including the 0x designation
-  if (scalar != marker) {
-    printf("Before rounding creal is %la (%g), afterwards it is %la (%g)\n",
-	   creal(scalar),creal(scalar),creal(marker),creal(marker));
-    printf("Before rounding cimag is %la (%g), afterwards it is %la (%g)\n",
-	   cimag(scalar),cimag(scalar),cimag(marker),cimag(marker));
-  }
+  char *scalar_string = sca_get_str(scalar);
+  char *marker_string = sca_get_str(*marker);
+  printf("Before rounding, scalar is %s, afterwards it is %s.\n", scalar_string, marker_string);
+  free(marker_string);
+  free(scalar_string);
+  printf("calling sca_hash\n");
 #endif    
   
-  //    return hash_from_two_doubles(creal(marker), cimag(marker), exponent);
-#ifdef USE_COMPLEX
-  return hash_from_two_doubles(creal(marker), cimag(marker), exponent);
-#endif
-#ifdef USE_REAL
-  return hash_from_one_double(marker, exponent);
-#endif
-#ifdef USE_INTEGER
-  return  mult_golden_hash(marker, exponent);
-#endif
+  return sca_hash(*marker, exponent);
   
+#undef DEBUG  
 }
 
 
@@ -349,10 +257,11 @@ alloc_hash_node()
 /*
  * lookup/insert/delete an entry
  */
+
 hash_node_t *
 hash_lookup(hash_table_t *table, record_ptr_t record_ptr, uint64_t hash_val)
 {
-  printf("WARNING: In %s which has NO CODE yet\n",__func__);
+  fprintf(stderr,"WARNING: In %s which has NO CODE yet\n",__func__);
   return NULL;
 }
 
@@ -434,11 +343,11 @@ hash_insert_at_tail(hash_table_t *table, record_ptr_t record_ptr, uint64_t hash_
 #endif
 
   return new;
-};
+}
 
 
 //   Authors: Bill, Jenny, Steve
-// record_ptr is a uint64_t * which is either a mat_add_t, op_add_t, or info_add_t
+// record_ptr is a uint64_t * which is either a mat_ptr_t, op_ptr_t, or info_ptr_t
 int
 hash_node_remove(hash_table_t *table, record_ptr_t record_ptr, uint64_t hash_val)
 {
@@ -454,34 +363,50 @@ hash_node_remove(hash_table_t *table, record_ptr_t record_ptr, uint64_t hash_val
     {
       if (n->record_ptr == record_ptr)
 	{
-	  if (n->prev)
-	    n->prev->next = n->next;
-	  else
-	    {
-	      table->heads[hash_val] = n->next;
-	      if (!n->next)
-		table->active_chains--;
-	    }
-
-	  if (n->next)
-	    n->next->prev = n->prev;
-          else 
-            table->tails[hash_val] = n->prev;
-	  
-	  table->active_entries--;
-
-#ifdef HASHSTATS
-          (table->num_nodes[hash_val])--;
-#endif
-
-          // free node pointer, the calling program must free record pointer!
-	  free(n); 
-
+          hash_node_remove_node(table, n, hash_val);
 	  return 1;   // successfully removed node
 	}
       n = n->next;
     }
   return 0;   // nothing was removed
+}
+
+
+//   Authors: Bill, Jenny, Steve
+// n points to the specific node to be removed
+void
+hash_node_remove_node(hash_table_t *table, hash_node_t *n, uint64_t hash_val)
+{
+  if (n->prev)
+    {
+      n->prev->next = n->next;
+    }
+  else
+    {
+      table->heads[hash_val] = n->next;
+      if (!n->next)
+        {
+          table->active_chains--;
+        }
+    }
+
+  if (n->next)
+    {
+      n->next->prev = n->prev;
+    }
+  else
+    { 
+      table->tails[hash_val] = n->prev;
+    }
+	  
+  table->active_entries--;
+
+#ifdef HASHSTATS
+  (table->num_nodes[hash_val])--;
+#endif
+
+  // free node pointer, the calling program must free record pointer!
+  free(n); 
 }
 
 
@@ -607,6 +532,34 @@ void hashstats_to_files(
 #endif
 
 
+// Hashes for basic types.
+
+/***************************************************************
+ *    mult_golden_hash
+ *    Author: Jenny Zito
+ *      Takes in a 64 bit unsigned integer and the exponent for hash table
+ *      returns a hash value  between 0 and 2^exponent-1.
+ *      The method is based on the multiplicative hash
+ *      described in Knuth Vol 3 which uses the golden mean.
+ *      The trick is to try to get a full 64 bits to right of decimal.
+ *      A straight-forward (but faulty) implementation would only
+ *      have 56 bits of entropy from the double golden ratio.
+ *      Also see p. 263 multiplicative hash in Corman, Leiserson Rivest and Steine
+ *      To get around this we created golden_big_int which contains
+ *      the fractional part of the golden mean shifted into a 64-bit
+ *      integer. Bill Carlson helped me get the double precision number
+ *      for the integer portion of 2^64 * (sqrt(5)-1)/2 using gp calculator.
+ *      The magic constant here is ^^^^^^^^^^^^^^^^^^^^ that, equal to
+ *      11400714819323198485ULL.
+ *****************************************************************/
+uint64_t
+mult_golden_hash(uint64_t key, uint64_t exponent)
+{
+	return (11400714819323198485ULL * key) >> (64 - exponent);
+
+}
+
+
 /***************************************************************
  *    recursive_hash_from_two_integers
  *    Author: Jenny Zito 
@@ -727,5 +680,94 @@ recursive_hash_from_int_list(uint64_t *tlist, uint64_t tlength, uint64_t exponen
    return pong;
 }
 
+
+
+/***************************************************************
+ *    hash_from_one_double         (called by hash_from_matrix_content)
+ *    Author: Jenny Zito and Laurie Law
+ *         This converts entropy of a double into an integer and
+ *         pass it to the mult_golden_hash function for hashing
+ ****************************************************************/
+uint64_t
+hash_from_one_double (double doub, uint64_t exponent)
+{
+
+  uint64_t int_of_doub;
+
+  // ensure that we aren't dealing with a negative zero
+  if (fpclassify(doub) == FP_ZERO) doub = 0.0;
+
+  // interpret the bits of the double to be an integer
+  // int_of_doub = *((uint64_t*)&doub);
+  memcpy((void *) &int_of_doub, (void *) &doub, sizeof(int_of_doub));
+
+  return mult_golden_hash(int_of_doub, exponent);
+}
+
+
+
+/***************************************************************
+ *    hash_from_one_longdouble
+ *    Author: Jenny Zito and Laurie Law
+ *         This converts entropy of a double into an integer and
+ *         pass it to the mult_golden_hash function for hashing
+ ****************************************************************/
+uint64_t
+hash_from_one_longdouble (long double ldoub, uint64_t exponent)
+{
+  return hash_from_one_double ((double) ldoub, exponent);
+}
+
+
+/***************************************************************
+ *    Author: Jenny Zito
+ *         This converts entropy of doubles into integers,
+ *         then circularly shifts the second integer and mod 2
+ *         adds it to the first to get a 64 bit integer to send
+ *         to the mult_golden_hash function for hashing
+ *         A constant, the "double salt" is added to prevent simple collisions
+ *         with real vs. imaginary and with the hash from four integers.
+ ****************************************************************/
+uint64_t
+hash_from_two_doubles (double d1, double d2, uint64_t exponent)
+{
+  uint64_t int1, int2;
+#ifdef DEBUG
+  printf("in hash_from_two_doubles\n");
+#endif
+
+  // ensure that we aren't dealing with a negative zero
+  if (fpclassify(d1) == FP_ZERO) d1 = 0.0;
+  if (fpclassify(d2) == FP_ZERO) d2 = 0.0;
+
+  // interpret the bits in each double of the complex number to be an integer
+  // int1 = *((uint64_t*)&d1);
+  // int2 = *((uint64_t*)&d2);
+  memcpy((void *) &int1, (void *) &d1, sizeof(int1));
+  memcpy((void *) &int2, (void *) &d2, sizeof(int1));
+
+  return recursive_hash_from_two_integers(int1,int2,exponent);
+#undef DEBUG
+}
+
+
+/***************************************************************
+ *    Author: Jenny Zito
+ *         This converts entropy of doubles into integers,
+ *         then circularly shifts the second integer and mod 2
+ *         adds it to the first to get a 64 bit integer to send
+ *         to the mult_golden_hash function for hashing
+ *         A constant, the "double salt" is added to prevent simple collisions
+ *         with real vs. imaginary and with the hash from four integers.
+ ****************************************************************/
+uint64_t
+hash_from_two_longdoubles (long double d1l, long double d2l, uint64_t exponent)
+{
+#ifdef DEBUG
+  printf("in hash_from_two_longdoubles, calling hash_from_two_doubles\n");
+#endif
+  return hash_from_two_doubles ((double) d1l, (double) d2l, exponent);
+#undef DEBUG
+}
 
 

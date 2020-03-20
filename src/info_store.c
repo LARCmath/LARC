@@ -2,7 +2,7 @@
 //   Matrix Information Store for Global Recursive Compression Scheme
 /******************************************************************
  *                                                                *
- * Copyright 2014, Institute for Defense Analyses                 *
+ * Copyright (C) 2014, Institute for Defense Analyses             *
  * 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           *
  * This material may be reproduced by or for the US Government    *
  * pursuant to the copyright license under the clauses at DFARS   *
@@ -17,8 +17,38 @@
  *                                                                *
  * Additional contributors are listed in "LARCcontributors".      *
  *                                                                *
- * POC: Jennifer Zito <jszito@super.org>                          *
- * Please contact the POC before disseminating this code.         *
+ * Questions: larc@super.org                                      *
+ *                                                                *
+ * All rights reserved.                                           *
+ *                                                                *
+ * Redistribution and use in source and binary forms, with or     *
+ * without modification, are permitted provided that the          *
+ * following conditions are met:                                  *
+ *   - Redistribution of source code must retain the above        *
+ *     copyright notice, this list of conditions and the          *
+ *     following disclaimer.                                      *
+ *   - Redistribution in binary form must reproduce the above     *
+ *     copyright notice, this list of conditions and the          *
+ *     following disclaimer in the documentation and/or other     *
+ *     materials provided with the distribution.                  *
+ *   - Neither the name of the copyright holder nor the names of  *
+ *     its contributors may be used to endorse or promote         *
+ *     products derived from this software without specific prior *
+ *     written permission.                                        *
+ *                                                                *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND         *
+ * CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,    *
+ * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF       *
+ * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE       *
+ * DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT HOLDER NOR        *
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,   *
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT   *
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;   *
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)       *
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN      *
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR   *
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, *
+ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.             *
  *                                                                *
  *****************************************************************/
 
@@ -73,7 +103,6 @@ char *return_info_name(uint64_t info_type) {
   return info_names[info_type];
 }
 
-
 void
 info_store_report(char *outfilepath)
 {
@@ -104,7 +133,6 @@ info_store_report(char *outfilepath)
   if  (strcmp(outfilepath,"stdout")) fclose(f);   // if not stdout then close
 }
 
-
 int
 create_info_store(size_t exponent)
 {
@@ -119,13 +147,19 @@ create_info_store(size_t exponent)
     store.inforecords_stored_now[info] = 0;
   }
   store.exponent = exponent;
-  store.size = 1 << store.exponent;
+  store.size = 1L << store.exponent;
   store.hash_table = alloc_hash(exponent);
   store.hash_table->record_size = sizeof(struct larc_info_t);
   return 1;
 }
 
-
+/*
+ * \ingroup larc
+ * \brief Generates a hash value based on an input matrixID and an info_type_t value
+ * \param matID A matrixID
+ * \param info_type An enum value indicating the type of metadata stored
+ * \return The hash value
+ */
 static uint64_t 
 hash_from_info(int64_t matID, info_type_t info_type) {
   uint64_t hash = recursive_hash_from_two_integers((uint64_t)matID, 
@@ -141,6 +175,7 @@ hash_from_info(int64_t matID, info_type_t info_type) {
  * the next available entry is found, or until the entire array has been
  * walked once (looping at the end) */
 /* if create_flag is 1, then a new record will be formed */
+
 struct larc_info_t *
 info_find(info_type_t info_type, int64_t matID, int create_flag)
 {
@@ -148,7 +183,7 @@ info_find(info_type_t info_type, int64_t matID, int create_flag)
 
   // test to see that info_type is valid
   if (info_type == INVALID_INFO) {
-    printf("in %s, attempting to find and INVALID_INFO\n",__func__);
+    fprintf(stderr,"in %s, attempting to find and INVALID_INFO\n",__func__);
     exit(-1);
   }
 
@@ -170,7 +205,7 @@ info_find(info_type_t info_type, int64_t matID, int create_flag)
     printf("In %s, returned from hash_get_chain\n",__func__);
   }
   
-  hash_node_t *last_zero_hit = NULL;
+  //hash_node_t *last_zero_hit = NULL;
   int len = 0;
   
   if (verbose) {
@@ -183,7 +218,7 @@ info_find(info_type_t info_type, int64_t matID, int create_flag)
   while (node_ptr)
     {
       len++;
-      info_add_t current_info_ptr = (info_add_t) (node_ptr->record_ptr);
+      info_ptr_t current_info_ptr = (info_ptr_t) (node_ptr->record_ptr);
       struct larc_info_t *info_rec_ptr = (struct larc_info_t *) current_info_ptr;
       if (matID == info_rec_ptr->my_matID && info_type == info_rec_ptr->info_type)
 	{
@@ -192,7 +227,7 @@ info_find(info_type_t info_type, int64_t matID, int create_flag)
 	  return info_rec_ptr;
 	}
       else {
-	if (matrix_is_invalid(mat_ptr_from_matrixID(info_rec_ptr->my_matID,"my",__func__,0)))
+	if (matrix_is_invalid(get_matPTR_from_matID(info_rec_ptr->my_matID,"my",__func__,0)))
 	  {
 	    hash_node_remove(store.hash_table, (record_ptr_t)current_info_ptr, hash);
 	    //FREE RECORD FOR NODE;
@@ -202,8 +237,8 @@ info_find(info_type_t info_type, int64_t matID, int create_flag)
 
       //  This was going to be used so that we could truncate the 
       //  end of the hash chain which would contain all nodes with zero hits
-      if (node_ptr->hits == 0)
-	last_zero_hit = node_ptr;
+      //if (node_ptr->hits == 0)
+	//last_zero_hit = node_ptr;
       node_ptr = node_ptr->next;
     }
   
@@ -244,6 +279,7 @@ info_find(info_type_t info_type, int64_t matID, int create_flag)
 // it with the variables passed to this function.
 // Panic if the record exists and you are trying to save conflicting
 // info_type or info_data
+
 int
 info_set(info_type_t info_type, int64_t my_matID, const char *info_data)
 {
@@ -253,7 +289,7 @@ info_set(info_type_t info_type, int64_t my_matID, const char *info_data)
 //     add the info to the appropriate hash chain, creating
 //     the record if necessary
 	if (info_type >= INVALID_INFO) {
-	  printf("Error in %s, invalid info_type\n",__func__);
+	  fprintf(stderr,"Error in %s, invalid info_type\n",__func__);
 	  return EINVAL;
 	}
 
@@ -270,7 +306,7 @@ info_set(info_type_t info_type, int64_t my_matID, const char *info_data)
             strcpy(info_rec_ptr->info_data,info_data);
 	  }
           else {
-            printf("string is too long in %s\n",__func__); 
+            fprintf(stderr,"string is too long in %s\n",__func__); 
             exit(1);
           }
           info_rec_ptr->info_type = info_type;
@@ -279,7 +315,7 @@ info_set(info_type_t info_type, int64_t my_matID, const char *info_data)
 	}
         else { // record already exists
 	  if (!strcmp(info_rec_ptr->info_data,info_data)) {
-            printf("Panic in %s because info_data %s is changing to %s\n",
+            fprintf(stderr,"Panic in %s because info_data %s is changing to %s\n",
          	   __func__, info_rec_ptr->info_data,info_data);
 	  }
 	}
@@ -347,7 +383,7 @@ int64_t info_hashID_by_matrixIDs(int64_t my_matID, const char *info_name)
 {
 
   // make sure that this matrixID corresponds to a matrix which still exists
-  mat_add_t my_matPTR  = mat_ptr_from_matrixID(my_matID, "my matID", __func__,0);
+  mat_ptr_t my_matPTR  = get_matPTR_from_matID(my_matID, "my matID", __func__,0);
 
   // check to see if this matrix has already been removed from the matrix store
   if (my_matPTR == MATRIX_PTR_INVALID) {
@@ -358,8 +394,8 @@ int64_t info_hashID_by_matrixIDs(int64_t my_matID, const char *info_name)
   info_type_t info_type = get_info_type_from_string_name(info_name);
   if (info_type == INVALID_INFO)
   {
-    printf("In %s: argument info_name\n\t%s\n",__func__,info_name);
-    printf(" is not a valid info record\n");
+    fprintf(stderr,"In %s: argument info_name\n\t%s\n",__func__,info_name);
+    fprintf(stderr," is not a valid info record\n");
     exit(-1);
   }
 
@@ -405,10 +441,10 @@ info_hash_chain_info_to_file(uint64_t hash, char *outfilepath, char *comment)
   hash_table_t *table_ptr = store.hash_table;
   hash_node_t *node_ptr = table_ptr->heads[hash];
   
-  info_add_t record_ptr;
+  info_ptr_t record_ptr;
   
   while (node_ptr)  { 
-    record_ptr = (info_add_t) node_ptr->record_ptr; 
+    record_ptr = (info_ptr_t) node_ptr->record_ptr; 
     
     // HEADER: "info_name  my_matID   info_data\n"
     info_type_t info_type = record_ptr->info_type;
@@ -443,21 +479,26 @@ info_hash_chain_info_to_screen(uint64_t hash, char *comment)
 
 /*************************************************************************** 
  *                   base_info_hash_clean                        *
- *   Cleans a hash chain in the info store for a given hash and info_type      *
+ *   Cleans a hash chain in the info store                       *
  ***************************************************************************/
+/*
+ * \ingroup larc
+ * \brief Cleans a hash chain in the info store
+ * \param hashID The hash specifing the hash chain to be cleaned
+ */
 static int
 base_info_hash_clean(uint64_t hashID)
 {
 	hash_table_t *table_ptr = store.hash_table;
 	hash_node_t *node_ptr = table_ptr->heads[hashID];
-	info_add_t current_info_ptr;
+	info_ptr_t current_info_ptr;
 	
 	// walk throught the hash chain, removing nodes along the way if any of the 3 matrices are invalid
 	while (node_ptr)  {
-		current_info_ptr = (info_add_t) node_ptr->record_ptr;
+		current_info_ptr = (info_ptr_t) node_ptr->record_ptr;
 		struct larc_info_t *info_rec_ptr = (struct larc_info_t *) current_info_ptr;
         // if any of the matrices have been deleted from the store, panic
-        if (matrix_is_invalid(mat_ptr_from_matrixID(info_rec_ptr->my_matID,"my_matID",__func__,0)))
+        if (matrix_is_invalid(get_matPTR_from_matID(info_rec_ptr->my_matID,"my_matID",__func__,0)))
 	    {
 			hash_node_remove(store.hash_table, (record_ptr_t)current_info_ptr, hashID);
                         // keep statistics of nodes that have been removed 
@@ -477,14 +518,14 @@ base_info_hash_clean(uint64_t hashID)
 
 /*************************************************************************** 
  *                   clean_info_hash_chain                                   *
- *   Cleans a hash chain in the info store for a given hash and info_name    *
+ *   Cleans a hash chain in the info store for a given hash *
  ***************************************************************************/
 int
 clean_info_hash_chain(uint64_t hashID)
 {
 	uint64_t max = store.size;
 	if ((hashID < 0) || (hashID >= max)) {
-		printf("Error: hash value out of range\n");
+		fprintf(stderr,"Error: hash value out of range\n");
 		return(0);
 		}
 

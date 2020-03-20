@@ -1,7 +1,7 @@
 //                    exampleLARC.c
 /******************************************************************
  *                                                                *
- * Copyright 2014, Institute for Defense Analyses                 *
+ * Copyright (C) 2014, Institute for Defense Analyses             *
  * 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           *
  * This material may be reproduced by or for the US Government    *
  * pursuant to the copyright license under the clauses at DFARS   *
@@ -16,8 +16,38 @@
  *                                                                *
  * Additional contributors are listed in "LARCcontributors".      *
  *                                                                *
- * POC: Jennifer Zito <jszito@super.org>                          *
- * Please contact the POC before disseminating this code.         *
+ * Questions: larc@super.org                                      *
+ *                                                                *
+ * All rights reserved.                                           *
+ *                                                                *
+ * Redistribution and use in source and binary forms, with or     *
+ * without modification, are permitted provided that the          *
+ * following conditions are met:                                  *
+ *   - Redistribution of source code must retain the above        *
+ *     copyright notice, this list of conditions and the          *
+ *     following disclaimer.                                      *
+ *   - Redistribution in binary form must reproduce the above     *
+ *     copyright notice, this list of conditions and the          *
+ *     following disclaimer in the documentation and/or other     *
+ *     materials provided with the distribution.                  *
+ *   - Neither the name of the copyright holder nor the names of  *
+ *     its contributors may be used to endorse or promote         *
+ *     products derived from this software without specific prior *
+ *     written permission.                                        *
+ *                                                                *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND         *
+ * CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,    *
+ * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF       *
+ * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE       *
+ * DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT HOLDER NOR        *
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,   *
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT   *
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;   *
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)       *
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN      *
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR   *
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, *
+ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.             *
  *                                                                *
  *****************************************************************/
 
@@ -49,475 +79,403 @@
 #include "matrix_store.h"
 #include "op_store.h"
 #include "organize.h"
+#include "scalars.h"
+#include "experimental.h"
 
-// This version uses matrixIDs instead of pointers
 
-static inline void print_usage (char *program)
-{
-      printf("Usage: %s [-h] [-r] [-v] [-t <int>] [-m <int>] [-o <dir>] [-s <int>] [-x <int>] [-X <int>] [-z <int>]\n", program);
-      printf("Options:\n");
-      printf("  -h           Display this usage information\n");
-      printf("  -r           Print a report of matrix and op stores when program completes\n");
-      printf("  -v           Print verbose information\n");
-      printf("  -t <int>     Display reporting information every <int> seconds>\n");
-      printf("  -m <int>     Specify maximum size of matrices is 2^<int> by 2^<int> (default %d)\n", DEFAULT_MAX_LEVEL);
-      printf("  -o <dir>     Save output data in <dir>\n");
-      printf("  -x <int>     Use <int> bits for hashing matrix_store (default %zd)\n", (size_t)DEFAULT_MATRIX_STORE_EXPONENT);
-      printf("  -X <int>     Use <int> bits for hashing op_store (default %zd)\n", (size_t)DEFAULT_OP_STORE_EXPONENT);
-      printf("  -s <int>     Locality-approximation parameter rounds to <int> significant bits (default %d)\n", SIGHASH_DEFAULT);
-      printf("  -z <int>     Locality-approximation parameter: value within <int> bits of zero equates to zero  (default %d)\n", ZEROBITTHRESH_DEFAULT);
-      printf("\n");
-      exit(1);
+// TODO: does -1 have a global name
+// how to handle examples
+
+
+
+
+/* A routine to negate scalar of any scalarType.
+ * Result is passed by <negated> parameter.*/ 
+void negate(scalarType *negated, const scalarType val){
+    scalarType neg1;
+    sca_init(&neg1);
+    sca_set_str(&neg1, "-1");
+
+    sca_mult(negated, neg1, val);
+    sca_clear(&neg1);
 }
 
-static inline double wallsec (void)
-{
-      struct timeval current_time;
-      gettimeofday(&current_time, NULL);
-      return current_time.tv_sec + 1e-6*current_time.tv_usec;
+/* Rounds input to nearest integer and then returns string version of 
+ * integer. */
+char *real_to_str(const long double val){
+    char *out = calloc(21, sizeof(char));
+    int64_t val_rounded = rint(val);
+    snprintf(out, 20, "%ld", val_rounded);
+    return out;
 }
+
+
+// this is a goofy function, that illustrates what you can do
+char *zero_to_one_else_two(const scalarType val){
+    // make a scalarType with value 0.
+    scalarType zero;
+    sca_init(&zero);
+    sca_set_str(&zero, "0");
+
+    // compare the incoming val. if it is 0, make it 1.
+    int val_is_zero = sca_eq(val, zero);
+    sca_clear(&zero);
+
+    int size_of_output = 2;
+    char *out = calloc(size_of_output + 1, sizeof(char));
+    if (val_is_zero)
+        snprintf(out, size_of_output, "1");
+    else
+        snprintf(out, size_of_output, "2");
+    return out;
+}
+
 
 
 int main (int argc, char *argv[])
 {
-      // Default hash exponent size
-      size_t hash_exponent_matrix = DEFAULT_MATRIX_STORE_EXPONENT;
-      size_t hash_exponent_op = DEFAULT_OP_STORE_EXPONENT;
-      int zerobitthresh = ZEROBITTHRESH_DEFAULT;
-      int sighash = SIGHASH_DEFAULT;
-      mat_level_t max_level = DEFAULT_MAX_LEVEL;
+  initialize_larc(25, 26, 10, -1, -1, 1);
 
-      // Command line parameters
-      char *output_dir = NULL;
-      //      char *approxtype = NULL, *value = NULL;
-      int opt = 0;
-      int final_report = 0;   // report on table sizes and usage at end of run
-      int verbose = 1;
-      unsigned int report_period = 0;     // periodic reporting
+    /*
+     * Example 0:
+     * [type=ANY]
+     * -----------
+     *
+     * Create some matices, do some operations on them, print some store
+     * reports. 
+     *
+     * Step 1: we create some matrices from scratch. 
+     *
+     * Step 2: we add the matrices together, square the entries of the result, 
+     * and multiply the entries of the result by 7. 
+     *
+     * Step 3: we check the size of the matrix store, print out a matrix store
+     * report, remove all but the original two matrices from the store, 
+     * clean the store, and print out a report. 
+     *
+     */
 
-      // Completion statistics
-      double start_time, stop_time;
+    printf("Running Example 1.\n");
+    // Step 1: build some matrices.
+    // one way to create a matrix is to build the scalarType values 
+    // from scratch using the scalar functions.
+    scalarType scalar0;
+    sca_init(&scalar0);
+    sca_set_str(&scalar0, "7"); // 3 exists in all TYPES
 
-
-#define COMMAND_LINE
-#ifdef COMMAND_LINE
-/*       // Parse command line options */
-       while ((opt = getopt(argc, argv, "hrvt:m:o:s:X:x:z:")) != -1) { 
-             switch (opt) { 
-             case 'r':
-                   final_report = 1;
-                   break;
-             case 'v':
-                   verbose++;
-                   break;
-             case 't':
-                   report_period = atoi(optarg);
-                   break;
-             case 'm':
-                   max_level = atoi(optarg);
-                   break;
-	     case 'o':
-                   if (output_dir != NULL) {
-                         printf("Error: You can only specify one output directory\n");
-                         print_usage(argv[0]);
-                   }
-                   output_dir = optarg;
-                   break;
-             case 's':
-                   sighash = atoi(optarg);
-                   break;
-             case 'X':
-                   hash_exponent_op = atoi(optarg);
-                   break;
-             case 'x':
-                   hash_exponent_matrix = atoi(optarg);
-                   break;
-             case 'z':
-                   zerobitthresh = atoi(optarg);
-                   break;
-             default:
-                   print_usage(argv[0]);
-                   break;
-             }
-       }
-
-       if (verbose) {
-           printf ("\n==================================================================\n");
-             printf ("|  The hash table exponent for matrix store is %zd and the hash table size is %zd\n", 
-                hash_exponent_matrix, (size_t)1<<hash_exponent_matrix);
-             printf ("|  The hash table exponent for each op store is %zd and the hash table size is %zd\n", 
-           hash_exponent_op, (size_t)1<<hash_exponent_op);
-	     printf( " The value of sighash is %d\n",sighash);
-	     printf( " The value of zerobitthresh is %d\n",zerobitthresh);
-	     printf( " The value of max_level is %d\n",max_level);
-             printf ("==================================================================\n\n");
-       }
+    // produce a matrix pointer for scalar 7
+    mat_ptr_t seven_mat = get_valMatPTR_from_val(scalar0);
+    printf("Here is a matrix with one entry:\n");
+    print_naive_by_matPTR(seven_mat);
+    
+    // alternatively, if you don't care to keep your code `TYPE agnostic'
+    // you can declare your scalar as you normally would (using the actual
+    // type or scalarType)
+    // Eg. REAL, INTEGER, and COMPLEX don't need to be initialized
+    // so you could skip that step. 
+#ifdef USE_REAL
+    long double scalar1 = 2.333;
+    scalarType scalar2 = -3;
+#elif defined(USE_INTEGER)
+    int64_t scalar1 = 2;
+    scalarType scalar2 = -3;
+#elif defined(USE_COMPLEX)
+    long double complex scalar1 = 2+I*1;
+    scalarType scalar2 = -3;
+#elif defined(USE_MPINTEGER)
+    mpz_t scalar1;
+    mpz_init(scalar1);
+    mpz_ui_pow_ui(scalar1, 2, 65);
+    scalarType scalar2;  
+    //notice that mpz_init is called on mpz_t but sca_init is called on pointer 
+    //to mpz_t
+    sca_init(&scalar2);  
+    mpz_set_si(scalar2, -3);
+#elif defined(USE_MPRATIONAL)
+    mpq_t scalar1;
+    mpq_init(scalar1);
+    mpq_set_ui(scalar1, 3, 5);
+    scalarType scalar2;
+    sca_init(&scalar2);
+    mpq_set_si(scalar2, -3, 1);
+#elif defined(USE_MPRATCOMPLEX)
+    larc_mpratcomplex_t scalar1;
+    sca_init(&scalar1);
+    mpq_set_ui(scalar1->real, 3, 5);
+    mpq_set_ui(scalar1->imag, 2, 5);
+    scalarType scalar2;
+    sca_init(&scalar2);
+    mpq_set_si(scalar2->real, -3, 1);
+    mpq_set_si(scalar2->imag, -1, 1);
+#elif defined(USE_MPREAL)
+    mpfr_t scalar1;
+    sca_init(&scalar1);
+    sca_set_2ldoubles(&scalar1, 3.0, 0.0);
+    scalarType scalar2;
+    sca_init(&scalar2);
+    sca_set_2ldoubles(&scalar2, 4.7, 0.0);
+#elif defined(USE_MPCOMPLEX)
+    mpc_t scalar1;
+    sca_init(&scalar1);
+    sca_set_2ldoubles(&scalar1, 3.0, 1.0);
+    scalarType scalar2;
+    sca_init(&scalar2);
+    sca_set_2ldoubles(&scalar2, 4.7, -1.0);
 #endif
 
-      // if -t option sets report_period then a report on tables and 
-      // memory given every report_period seconds
-      if (report_period) create_report_thread(report_period);
+    // lastly, we could grab an already initialized scalar from a short list
+    // used in preloading matrices
+    mat_ptr_t mat_ptr_scalarM1 = get_matPTR_from_matID(matID_scalarM1, "", __func__, 0);
+    scalarType scalar3;
+    sca_init(&scalar3);
+    sca_set(&scalar3, matrix_trace(mat_ptr_scalarM1));   // so scalar4 = -1.
+    // I think you could also do this:
+    // scalarType *scalar3 = &matrix_trace(mat_ptr_scalarM1);
+    // but then you (probably) don't want to change it's value or clear it
+    // because that would effect the one in the store (which intuitively should
+    // not change... -1 should stay -1). 
 
-      struct stat st = {0};
-      if (stat("./out", &st) == -1) {
-	mkdir("./out", 0700);
-      }
+    // the matrix can be built from a list in row major form
+    scalarType *vals = malloc(4 * sizeof(scalarType));
+    // apparently you can't do something like:
+    //vals[0] = scalar0; 
+    // with mpz_t and mpq_t so we have to reproduce these scalar values
+    for (int i = 0; i < 4; i++)
+        sca_init(&(vals[i]));
+    sca_set(&(vals[0]), scalar0); 
+    sca_set(&(vals[1]), scalar1); 
+    sca_set(&(vals[2]), scalar2); 
+    sca_set(&(vals[3]), scalar3);
+    mat_ptr_t mat_ptr = row_major_list_to_store(vals, 1, 1, 2);
 
-      // Initialize the matrix store and op stores
-      // Preloads basic matrices: Zeros, Identities, integer Hadamards, and other common 2x2 and 4x4 matrices
-      // Start the seppuku thread to kill program if it is using too much memory
-      initialize_larc(hash_exponent_matrix,hash_exponent_op,max_level,sighash,zerobitthresh);
+    // now that the scalars are incorporated into matrices, we can clean them
+    // up.
+    sca_clear(&scalar0);
+    sca_clear(&scalar1);
+    sca_clear(&scalar2);
+    sca_clear(&scalar3);
+    for (int i = 0; i < 4; i++)
+        sca_clear(&(vals[i]));
+    free(vals);
 
-      start_time = wallsec();
-       
-      printf("The matrix store and operation stores have been created.\n");
-      printf("Now we will preload the matrix store with all-zero, identity, and other useful matrices.\n");
+    // then we can print the matrix to screen
+    printf("Here is our first matrix:\n");
+    print_naive_by_matPTR(mat_ptr);
 
-      // Calculate number of matrices created, then print part of matrix store
-      int num_matrices_made = num_matrices_created();
-      printf("%d matrices have been created\n",num_matrices_made);
-      int last_matrix_index = num_matrices_made - 1;
-      
-      char comment[1024];
-      sprintf(comment,"Matrix store after preload; parameters=%zd,%zd,%d,%d,%d.\n",
-		    (size_t)hash_exponent_matrix,(size_t)hash_exponent_op,max_level,sighash,zerobitthresh);
-      char file_name[1024] = "./out/matrix_store_after_preload";
-      matrix_store_info_to_file(0,last_matrix_index,file_name,comment);
-      
+    // it might be easier to build from a list of character strings
+    // (from the python interface)
+    char **vals2 = calloc(4, sizeof(char*));
+    vals2[0] = vals2[3] = "1";
+    vals2[1] = "2";
+    vals2[2] = "0"; 
+    int64_t matID = row_major_list_to_store_matrixID(vals2, 1, 1, 2);
+    free(vals2);
+    mat_ptr_t mat_ptr2 = get_matPTR_from_matID(matID, "", __func__, 0);
+    printf("Here is another matrix:\n");
+    print_naive_by_matPTR(mat_ptr2);
 
-printf("Now we give some examples of:\n");
-      printf("  * how to use input/output,\n");
-      printf("  * and use math functions.\n");
-#ifndef USE_INTEGER
-      printf("  * We also illustrate the effect of the locality-approximation parameters,\n");
-      printf("    which effect numerical precision issues.\n\n");
-#endif 
-      printf("First we show how to build a matrix, read it into the larc store\n");
-      printf("and store it in a file or print it to the screen in various formats.\n");
+    // Step 2: 
+    // we add the matrices together, 
+    mat_ptr_t sum = matrix_add(mat_ptr, mat_ptr2);
+    printf("When you add them together you get:\n");
+    print_naive_by_matPTR(sum);
+    // square the entries of the result, 
+    // and multiply the entries of the result by 7. 
+    mat_ptr_t squared_sum = matrix_entrySquared(sum, seven_mat);
+    printf("Squaring entries and multiplying by seven gives:\n");
+    print_naive_by_matPTR(squared_sum);
 
+    // Step 3:
+    // check the size of the matrix store now
+    printf("The size of the matrix store is %ld.\n", matrix_store_matrixCount() + matrix_store_scalarCount());
 
-      /*****************************
-       * EXAMPLES OF I/O FUNCTIONS *
-       *****************************/
+    // print a report on the matrix store to screen
+    matrix_store_report("stdout");
 
+    // hold the two matrices we started with
+    set_hold_matrix(mat_ptr);
+    set_hold_matrix(mat_ptr2);
+    // clear the matrix store of everything else and repair the op store
+    // to account for the lost matrices. 
+    clean_matrix_store();
+    empty_op_store();
+    printf("Now the size of the matrix store is %ld.\n", matrix_store_matrixCount() + matrix_store_scalarCount());
+    // for good measure, let's delete the first matrix. 
+    release_hold_matrix(mat_ptr);
+    remove_matrix_from_mat_store_by_matrix(mat_ptr);
+    printf("Now the size of the matrix store is %ld.\n", matrix_store_matrixCount() + matrix_store_scalarCount());
 
-      //We support integer, real, and complex numbers.
-#ifndef USE_COMPLEX
-      ScalarType scalar7 = 7;
-#else 
-      //If complex is used, be sure to add 0*I for values without an imaginary component.
-      ScalarType scalar7 = 7 + 0*I;
-#endif
-   
-      //storing scalar 7 
-      //the last two arguments are the level of the matrix: the matrix is of size 2^level x 2^level 
-      int64_t mID_scalar7 = matrix_get_matrixID_from_scalar(scalar7);
-      
-      //If you anticipate using a value many times in the course of a computation,
-      //you can "hold" it in the matrix store and release it later
-      set_hold_matrix_from_matrixID(mID_scalar7);
-      //If you would like to re-use a particular matrix, you can store the name using extern. 
-      //See global.c and global.h for an example of how to do this.
+    /*
+     * Example 1: 
+     * [type=REAL]
+     * ------------
+     * #json #reading #writing #convertingtypes
+     *
+     * Reading and writing matrices from/to json files: 
+     *
+     * Step 1: We create a REAL valued matrix and write the matrix
+     * to a json file. 
+     *
+     * Step 2: we use a custom function that negates real values and read in 
+     * the json file such that we get a new matrix where all the entries are 
+     * negated.
+     *
+     * Step 3: we use a custom function that rounds real values to integers
+     * and write out the matrix so that it can be read in with type INTEGER. 
+     */
 
-      printf("We have stored scalar 7 and are printing it to the screen.\n");
-      print_matrix_naive_by_matrixID(mID_scalar7);
+#ifdef USE_REAL 
+    printf("Running Example 1.\n");
+    // Step 1: 
+    // I'll just pick some values to use as entries to our sample matrix:
+    long double valsE1[4] = {0.5L, 0.3333L, -3.0L, 8.2223L};
+    mat_ptr_t mat_ptrE1 = row_major_list_to_store(valsE1, 1, 1, 2);
 
-       //Now we construct a square 2x2 matrix of all 7's.
-      //The 0th entry in the submatrix corresponds to the upper left quadrant of the matrix,
-      //the 1st to the upper right, the 2nd to the lower left, and the 3rd to the lower right.
-      int64_t panel_square7[4];
-      panel_square7[0] = mID_scalar7;
-      panel_square7[1] = mID_scalar7;
-      panel_square7[2] = mID_scalar7;
-      panel_square7[3] = mID_scalar7;
-      //the matrix is of size 2^1 x 2^1, so both the row and column levels are 1
-      int64_t mID_square7 = matrix_get_matrixID_from_panel(mID_scalar7,mID_scalar7,mID_scalar7,mID_scalar7, 1, 1);
- 
-      printf("We now write square 7 to screen and various file formats in the out directory.\n");
-      print_matrix_naive_by_matrixID(mID_square7);
-      //writing to a JSON file
-      matrix_write_json_file_matrixID(mID_square7, "./out/square7.json");
-      //writing to a naive format
-      print_matrix_to_file_naive_by_matrixID(mID_square7,"./out/square7.naive");
-     
+    char *filepath = "../tests/dat/out/example1_original.json";
+    write_larcMatrix_file_by_matPTR(mat_ptrE1, filepath);
+    printf("The original matrix is:\n");
+    print_naive_by_matPTR(mat_ptrE1);
+    printf("\n\n");
 
-      //NB: THIS IS COMMENTED OUT TO RESOLVE AN UNUSED VAR WARNING.
-      //writing a 2x2 matrix of 7's and 0's in row-major format to the store
-      //ScalarType rmm[4] = {7,0,0,7};
-      //here, we specify the row and the column levels, as well as the length of the row major matrix
-      //mat_add_t mID_rmm = row_major_list_to_store_matrixID(rmm, 2, 2, 4);
-      
-      //Now we construct a 2x1 matrix of all 7's.
-      int64_t mID_rect7 = stack_matrixID(mID_scalar7, mID_scalar7);
-      printf("We are printing 2x1 matrix of all 7's to the screen.\n");
-      print_matrix_naive_by_matrixID(mID_rect7);
+    // Step 2: 
+    // function <negate> defined above multiplies a scalar by -1 (for any
+    // scalar type- for REAL in this case). 
+    mat_ptr_t neg_mat_ptr = read_and_alter_vals_larcMatrix_file_return_matPTR(filepath, negate);
+    // verify that the following file is as expected. 
+    write_larcMatrix_file_by_matPTR(neg_mat_ptr, "../tests/dat/out/example1_negated.json");
+    printf("The negated matrix is:\n");
+    print_naive_by_matPTR(neg_mat_ptr);
+    printf("\n\n");
 
-      //Now we print the part of the matrix store that has been created since the preload.
-      num_matrices_made = num_matrices_created();
-      printf("\n%d matrices have been created.\n", num_matrices_made);
-      int start = last_matrix_index + 1;
-      int end = num_matrices_made - 1;
-      matrix_store_info_to_file(start,end,"./out/ALLsevens.store","Matrices added after preload");
-
-
-      // get hash value for a matrix we are about to remove
-      int64_t hashID = matrix_hashID_from_matrixID(mID_rect7);
-
-      // print the hash chain
-      matrix_hash_chain_info_to_file(hashID, "./out/hashChain1", "hash chain before removal");
-      matrix_hash_chain_info_to_screen(hashID, "hash chain before removal");
-
-      //We can also delete matrices (that are not held or locked) from the store.
-      printf("\nDeleting the column of 7s from the store\n");
-      remove_matrix_from_mat_store_by_matrixID(mID_rect7);
-      matrix_store_info_to_file(start,end,"./out/SOMEsevens.store","Removed column of sevens");
-
-      // print the hash chain
-      matrix_hash_chain_info_to_file(hashID, "./out/hashChain2", "hash chain after removal");
-	  matrix_hash_chain_info_to_screen(hashID, "hash chain after removal");
-
-      /******************************
-       * EXAMPLES OF MATH FUNCTIONS *
-       ******************************/
-      //syntax is fairly self-explanatory: operation(mID_matrix_A, mID_matrix_B)
-      //NB: adjoint only has one argument, since it is not a binary operation
-      
-      ScalarType scalarM1 = -1;
-#ifndef USE_INTEGER
-      ScalarType scalar0 = 0;
-//      int64_t mID_scalar0 = matrix_get_matrixID_from_scalar(scalar0);
-#endif
-#ifdef USE_COMPLEX
-      ScalarType scalar0i1 = 1*I;
-      int64_t mID_scalar0i1 = matrix_get_matrixID_from_scalar(scalar0i1);
-#endif
-      int64_t mID_scalarM1 = matrix_get_matrixID_from_scalar(scalarM1);
-
-      printf("testing scalar_mult:\n");
-#ifdef USE_COMPLEX
-      int64_t samp_mID = scalar_mult_matrixID(mID_scalar0i1,mID_square7);
+    // Step 3: 
+    // At any given time, we can set custom functions in for the scalar 
+    // operations package.
+    // In this case, we change the sca_get_str routine to be the real_to_str
+    // routine written above that first rounds real numbers before converting
+    // them to integer strings. 
+    define_sca_get_str(real_to_str);
+    write_larcMatrix_file_by_matPTR(neg_mat_ptr, "../tests/dat/out/example1_negAndRounded.json");
+    printf("The integer negated matrix is:\n");
+    print_naive_by_matPTR(neg_mat_ptr);
+    // reset the scalar operations to normal
+    init_arithmetic_scalarOps(1);
 #else
-      int64_t samp_mID = scalar_mult_matrixID(mID_scalarM1,mID_square7);
+    printf("Example 1 only works with TYPE=REAL.\n");
 #endif
-      print_matrix_naive_by_matrixID(samp_mID);
-      printf("testing addition:\n");
-      int64_t samp1_mID = matrix_add_matrixID(samp_mID,samp_mID);
-      print_matrix_naive_by_matrixID(samp1_mID);
-      printf("testing adjoint:\n");
-      int64_t samp2_mID = matrix_adjoint_matrixID(samp_mID);
-      print_matrix_naive_by_matrixID(samp2_mID);
-      printf("testing matrix mult:\n");
-      int64_t samp3_mID = matrix_mult_matrixID(samp2_mID,samp_mID);
-      print_matrix_naive_by_matrixID(samp3_mID);
-      
-      // test printing op store hash chain
-      char *op_name = "PRODUCT";
-      hashID = op_hashID_by_matrixIDs(samp2_mID, samp_mID, op_name);
-      printf("About to test ability to print op hash chains to file\n");
-      op_hash_chain_info_to_screen(hashID, "print hash chain including matrix multiplication");
-      
-      printf("testing kron product:\n");
-      int64_t samp4_mID = kronecker_product_matrixID(samp_mID,samp_mID);
-      print_matrix_naive_by_matrixID(samp4_mID);
-      printf("testing join:\n");
-      int64_t samp5_mID = join_matrixID(samp_mID,samp_mID);
-      print_matrix_naive_by_matrixID(samp5_mID);
-      printf("testing stack:\n");
-      int64_t samp6_mID = stack_matrixID(samp_mID,samp_mID);
-      print_matrix_naive_by_matrixID(samp6_mID);
 
-#ifndef USE_INTEGER
-      /*******************************
-       * EXAMPLES OF LOCALITY-APPROXIMATION EFFECT *
-       *******************************/
 
-      //As is, all of the tests will pass in this section of the code.
-      //However, if you modify the parameters zerobitthresh and 
-      //sighash, you may start to see performance issues or numerical
-      //precision issues if you set these values to high or low values
-      //respectively.
+    /*
+     * Example 2: [any type]
+     * ------------
+     * #json #random #sparsity #count #locate #scalars
+     *
+     * Creating random (binary) matrices. 
+     *
+     * Step 1: We create a random matrix by cooking up the entries and building
+     * the matrix from scratch. 
+     *
+     * Step 2: We also use a specialized routine that produces a random binary
+     * matrix with a specified sparsity. (Particularly useful when used to
+     * compare against structured binary matrices with matching sparsity -
+     * difference in size should be due to 'structure'.)
+     * 
+     * Step 3: We count 1's in the matrix and locate the 1's. 
+     *
+     * Step 4: We further manipulate a binary random matrix. 
+     */
 
-      // Make matrices to test locality-approximation
-      // two by two tests
-      int level = 1;
-      int dim_whole = pow(2.0,(double)level);
+    printf("Running Example 2.\n");
 
-      ScalarType arr_a[4] = {.4, 0, 0, .3};
-      int64_t a_mID = row_major_list_to_store_matrixID(arr_a,level,level,dim_whole);
-      ScalarType arr_b[4] = {.8, 0, 0, .6};
-      int64_t b_mID = row_major_list_to_store_matrixID(arr_b,level,level,dim_whole);
-      ScalarType arr_c[4] = {-.4, 0, 0, -.3};
-      int64_t c_mID = row_major_list_to_store_matrixID(arr_c,level,level,dim_whole); 
-      // printf("The matrixIDs of a, b, and c are %zd %zd %zd\n", 
-      printf("The matrixIDs of a, b, and c are %" PRIu64 " %" PRIu64 " %" PRIu64 " \n",
-		(uint64_t)a_mID, (uint64_t)b_mID, (uint64_t)c_mID);
-     
-      int64_t d_mID = matrix_add_matrixID(a_mID,a_mID);
-      printf("MatrixID of a + a %" PRIu64 ", should be that of b %" PRIu64 " \n", (uint64_t)d_mID, (uint64_t)b_mID);
-      if (d_mID == b_mID){
-	printf("PASSED: [.4,0,0,.3] + [.4,0,0,3.] = [.8,0,0,.6]\n");
-      }
-      else { 
-	printf("FAILED: [.4,0,0,.3] + [.4,0,0,3.] = [.8,0,0,.6]\n");
-      }
-      
-      int64_t e_mID = matrix_add_matrixID(b_mID,c_mID);
-      printf("MatrixID of b + c %" PRIu64 ", should be that of a %" PRIu64 " \n", (uint64_t)e_mID, (uint64_t)a_mID);
-      if (e_mID == a_mID) { 
-	printf("PASSED: [.8,0,0,.6] + [-.4,0,0,-.3] = [.4,0,0,3.]\n");
-      }
-      else { 
-	printf("FAILED: [.8,0,0,.6] + [-.4,0,0,-.3] = [.4,0,0,3.]\n");
-      }
+    // Step 1: Create a random matrix from scratch. 
+    // To avoid checking the type, I'll choose some 'random' values common
+    // to all types. Trust me, they're random. 
+    char **vals3 = calloc(4, sizeof(char*));
+    vals3[0] = "1";
+    vals3[1] = "9";
+    vals3[2] = "11"; 
+    vals3[3] = "2";
+    matID = row_major_list_to_store_matrixID(vals3, 1, 1, 2);
+    free(vals3);
+    mat_ptr = get_matPTR_from_matID(matID, "", __func__, 0);
+
+    printf("A small 'random' matrix:\n");
+    print_naive_by_matPTR(mat_ptr);
+    printf("\n\n");
+
+    // Step 2: This routine produces a matrix for us: we input how many
+    // of a single nonzero scalar we want. In the matrixID version, the
+    // scalar has to be "1", but we will use "2" to be fancy. 
+    scalarType scalar;
+    sca_init(&scalar);
+    sca_set_str(&scalar, "2");
+    mat_ptr_t scalar_ptr = get_valMatPTR_from_val(scalar);
+    // now we have a pointer to the scalar 2
+    // we'll ask that the matrix be level 3 square, 
+    mat_level_t row_level = 3;
+    mat_level_t col_level = 3;
+    // we'll ask that the matrix have ten 2's appear in it. 
+    mpz_t scalarNum;
+    mpz_init(scalarNum);
+    mpz_set_ui(scalarNum, 10);
+
+    // create and write random matrix to file. 
+    mat_ptr_t randmat = random_bool_matrix_from_count(row_level, col_level, scalarNum, scalar_ptr);
+    char *filepathE2 = "../tests/dat/out/example2_randmat.json";
+    write_larcMatrix_file_by_matPTR(randmat, filepathE2);
+
+    // Step 3: we count 0's in the random matrix and make sure it makes
+    // sense. 
+    // This mpz_t type will hold the count. 
+    mpz_t zeroCount;
+    mpz_init(zeroCount);
+    // We need a scalarType version of 0, the scalar we'll be counting. 
+    scalarType zero;
+    sca_init(&zero);
+    sca_set_str(&zero, "0");
     
+    matrix_count_entries(zeroCount, randmat, zero);
+    char *zero_string = sca_get_str(zero);
+    gmp_printf("That random matrix we made has %Zd entries with value %s.\n", zeroCount, zero_string);
+    free(zero_string);
+    sca_clear(&zero);
+
+    // Incidentally, if we add the number of zeros to the number of the 
+    // sparse scalar, we should get the matrix size. 
+    mpz_t zsum;
+    mpz_init(zsum);
+    mpz_add(zsum, zeroCount, scalarNum);
+    if (0 == mpz_cmp_ui(zsum, (1L << row_level)*(1L << col_level)))
+        printf("Test passed!\n");
+    else
+        printf("Test failed!\n");
+
+    // We could locate where those sparse scalars were placed:
+    // but we have to use the json file, not the matrix pointer. 
+    int64_t **locations;
+    mpz_locate_entries_larcMatrixFile(&locations, scalarNum, filepathE2, scalar, 100);
+    char *scalar_string = sca_get_str(scalar);
+    printf("The scalar %s can be found at the following coordinates:\n", scalar_string);
+    free(scalar_string);
+    for (int64_t i = 0; mpz_cmp_ui(scalarNum, i) > 0; i++) {
+        printf("  [%ld, %ld]\n", locations[i][0], locations[i][1]);
+        free(locations[i]);
+    }
+    free(locations);
+
+    // Step 4: just for fun, we could hook the sca_get_str routine again
+    // (see Example 1) and make it so when we write out the random matrix
+    // again, the 0's are converted to 1's giving us a matrix of 1's and
+    // 2's instead of 0's and 2's. 
+    define_sca_get_str(zero_to_one_else_two);
+    write_larcMatrix_file_by_matPTR(randmat, "../tests/dat/out/example2_newrandmat.json");
+    // reset the scalar operations to normal
     
-      // scalar tests
-      level = 0;
-      dim_whole = pow(2.0,(double)level);
-      
-      ScalarType arr_f[1] = {.4};
-      int64_t f_mID = row_major_list_to_store_matrixID(arr_f,level,level,dim_whole);
-      //printf("We input the value into f (%zd) of .4, the matrix is:\n",(uint64_t)f_mID);
-      // print_matrix_naive_by_matrixID(f_mID);
 
-      ScalarType arr_g[1] = {.4+1e-5};
-      int64_t g_mID = row_major_list_to_store_matrixID(arr_g,level,level,dim_whole);
-      // printf("We input the value into g (%zd) of .4+1e-5, the matrix is:\n" ,(uint64_t)g_mID);
-      // print_matrix_naive_by_matrixID(g_mID);
-
-      ScalarType arr_h[1] = {.4-1e-10};
-      int64_t h_mID = row_major_list_to_store_matrixID(arr_h,level,level,dim_whole);
-      //printf("We input the value into h (%zd) of .4-1e-10, the matrix is:\n", (uint64_t)h_mID);
-      //print_matrix_naive_by_matrixID(h_mID);
-
-      int64_t i_mID = matrix_mult_matrixID(h_mID, mID_scalarM1);
-      printf("The calculated negative of h (%" PRIu64 ") is i (%" PRIu64 ") with matrix\n" ,(uint64_t)h_mID,(uint64_t)i_mID);
-      print_matrix_naive_by_matrixID(i_mID);
-
-      int64_t z_mID = matrix_get_matrixID_from_scalar(scalar0);
-      printf("The prestored value for zero is z (%" PRIu64 ") with matrix\n" , (uint64_t)z_mID);
-      print_matrix_naive_by_matrixID(z_mID);
-
-      int64_t j_mID = matrix_add_matrixID(f_mID,i_mID);
-      printf("We calculate f + i = j (%" PRIu64 "), with matrix\n" ,(uint64_t)j_mID);
-      print_matrix_naive_by_matrixID(j_mID);
-
-      if (j_mID == z_mID) {
-	printf("PASSED: .4 + (-1)*(.4) = 0\n");
-      }
-      else {
-	printf("FAILED: .4 + (-1)*(.4) = 0\n");
-      }
-
-      int64_t k_mID = matrix_mult_matrixID(g_mID,mID_scalarM1);
-      printf("The calculated negative of g (%" PRIu64 ") is k (%" PRIu64 ") with matrix\n" ,(uint64_t)g_mID,(uint64_t)k_mID);
-      print_matrix_naive_by_matrixID(k_mID);
-
-      int64_t l_mID = matrix_add_matrixID(f_mID,k_mID);
-      printf("We calculate f + k = l (%" PRIu64 "), with matrix\n" ,(uint64_t)l_mID);
-      print_matrix_naive_by_matrixID(l_mID);
-
-      if (g_mID == l_mID){
-	printf("ZERO THRESHOLD at least 1/10^5: SO (-1)*(.4 + 1e-5) + (.4) = 0\n");
-      }
-      else { 
-	printf("ZERO THRESHOLD greater than 1/10^5: SO (-1)*(.4 + 1e-5) + (.4) != 0\n");
-      }
-
-      ScalarType arr_w[1] = {1e-20};
-      int64_t w_mID = row_major_list_to_store_matrixID(arr_w,level,level,dim_whole);
-      if (w_mID == z_mID) {
-	printf("APPROXIMATION: 1e-20 = 0\n");
-      }
-      else { 
-	printf("APPROXIMATION: 1e-20 != 0\n");
-      }
-
-      ScalarType arr_y[1] = {1e-10};
-      int64_t y_mID = row_major_list_to_store_matrixID(arr_y,level,level,dim_whole);
-      if (y_mID == z_mID){ 
-	printf("APPROXIMATION: 1e-10 = 0\n");
-      }
-      else {
-	printf("APPROXIMATION: 1e-10 != 0\n");
-      }
-
-      ScalarType arr_v[1] = {7};
-      int64_t v_mID = row_major_list_to_store_matrixID(arr_v,level,level,dim_whole);
-      ScalarType arr_x[1] = {7+1e-20};
-      int64_t x_mID = row_major_list_to_store_matrixID(arr_x,level,level,dim_whole);
-      int64_t cc_mID = matrix_add_matrixID(w_mID,v_mID);
-      if (x_mID == cc_mID) { 
-	printf("C vs LARC local-approx addition: larc(7)+larc(1e-20) = larc(7+1e-20)\n");
-      }
-      else {
-	printf("C vs LARC local-approx addition: larc(7)+larc(1e-20) != larc(7+1e-20)\n");
-      }
-
-      ScalarType arr_aa[1] = {7+1e-10};
-      int64_t aa_mID = row_major_list_to_store_matrixID(arr_aa,level,level,dim_whole);
-      int64_t bb_mID = matrix_add_matrixID(y_mID,v_mID);
-      if (bb_mID == aa_mID) { 
-	printf("C vs LARC local-approx addition: larc(7)+larc(1e-10) = larc(7+1e-10)\n");
-      }
-      else { 
-	printf("C vs LARC local-approx addition: larc(7)+larc(1e-10) != larc(7+1e-10)\n");
-      }
-      
-      level = 0;
-      dim_whole = pow(2.0,(double)level);
-      ScalarType arr_m[1] = {sqrt(2)};
-      int64_t m_mID = row_major_list_to_store_matrixID(arr_m,level,level,dim_whole);
-      printf("We input the value into m (%" PRIu64 ") of sqrt(2), the matrix is:\n" ,(uint64_t)m_mID);
-      print_matrix_naive_by_matrixID(m_mID);
-
-      ScalarType arr_n[1] = {2};
-      int64_t n_mID = row_major_list_to_store_matrixID(arr_n,level,level,dim_whole);
-      printf("We input the value into n (%" PRIu64 ") of 2, the matrix is:\n" ,(uint64_t)n_mID);
-      print_matrix_naive_by_matrixID(n_mID);
-	  printf("and the matrixID is% " PRId64 ":\n" ,n_mID);
-
-      int64_t p_mID = matrix_mult_matrixID(m_mID,m_mID);
-      if (p_mID == n_mID){ 
-	printf("PASSED: sqrt(2) squared is the same as 2\n");
-      }
-      else { 
-	printf("FAILED: sqrt(2) squared is the same as 2\n");
-      }
-
-      int64_t q_mID = matrix_add_matrixID(m_mID,m_mID);
-      ScalarType arr_r[1] = {0.5};
-      int64_t r_mID = row_major_list_to_store_matrixID(arr_r,level,level,dim_whole);
-      int64_t s_mID = matrix_mult_matrixID(q_mID,r_mID);
-      if (m_mID == s_mID) { 
-	printf("PASSED: (sqrt2+sqrt2)/2 is the same as sqrt2\n");
-      }
-      else {
-	printf("FAILED: (sqrt2+sqrt2)/2 is the same as sqrt2\n");
-      }
-
-      ScalarType arr_t[1] = {1.0/sqrt(2)};
-      int64_t t_mID = row_major_list_to_store_matrixID(arr_t,level,level,dim_whole);
-      int64_t u_mID = matrix_mult_matrixID(t_mID,t_mID);
-      if (u_mID == r_mID) { 
-	printf("PASSED Hadamard test1: ((1/sqrt2)^2 is the same as .5\n");
-      }
-      else { 
-	printf("FAILED Hadamard test1: ((1/sqrt2)^2 is the same as .5\n");
-      }
-
-      matrix_store_info_to_file(0,num_matrices_created()-1,"./out/local_approx.store","finished locality approximation testing");
-#endif
-	
-
-      stop_time = wallsec();
-      printf("\nElapsed time = %.4g secs\n", stop_time - start_time);
-
-      if (final_report || verbose) {
-            matrix_store_report("stdout");
-            op_store_report("stdout");
-            rusage_report(0,"stdout");
-      }
-
-      return 0;
+    // clean up and return operations to normal
+    mpz_clear(zsum);
+    mpz_clear(zeroCount);
+    mpz_clear(scalarNum);
+    sca_clear(&scalar);
+    init_arithmetic_scalarOps(1);
 }
+

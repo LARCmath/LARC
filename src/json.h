@@ -1,16 +1,57 @@
 //                         json.h
-/*
- *
- * json.h
- * POC: Michael Schneider <maschn2@super.org>
- *
- * Copyright 2012, Institute for Defense Analyses
- * 4850 Mark Center Drive, Alexandria, VA; 703-845-2500
- * This material may be reproduced by or for the US Government
- * pursuant to the copyright license under the clauses at DFARS
- * 252.227-7013 and 252.227-7014.
- *
- */
+/******************************************************************
+ *                                                                *
+ * Copyright (C) 2014, Institute for Defense Analyses             *
+ * 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           *
+ * This material may be reproduced by or for the US Government    *
+ * pursuant to the copyright license under the clauses at DFARS   *
+ * 252.227-7013 and 252.227-7014.                                 *
+ *                                                                *
+ * LARC : Linear Algebra via Recursive Compression                *
+ * Authors:                                                       *
+ *   - Steve Cuccaro (IDA-CCS)                                    *
+ *   - John Daly (LPS)                                            *
+ *   - John Gilbert (UCSB, IDA adjunct)                           *
+ *   - Jenny Zito (IDA-CCS)                                       *
+ *                                                                *
+ * Additional contributors are listed in "LARCcontributors".      *
+ *                                                                *
+ * Questions: larc@super.org                                      *
+ *                                                                *
+ * All rights reserved.                                           *
+ *                                                                *
+ * Redistribution and use in source and binary forms, with or     *
+ * without modification, are permitted provided that the          *
+ * following conditions are met:                                  *
+ *   - Redistribution of source code must retain the above        *
+ *     copyright notice, this list of conditions and the          *
+ *     following disclaimer.                                      *
+ *   - Redistribution in binary form must reproduce the above     *
+ *     copyright notice, this list of conditions and the          *
+ *     following disclaimer in the documentation and/or other     *
+ *     materials provided with the distribution.                  *
+ *   - Neither the name of the copyright holder nor the names of  *
+ *     its contributors may be used to endorse or promote         *
+ *     products derived from this software without specific prior *
+ *     written permission.                                        *
+ *                                                                *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND         *
+ * CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,    *
+ * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF       *
+ * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE       *
+ * DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT HOLDER NOR        *
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,   *
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT   *
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;   *
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)       *
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN      *
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR   *
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, *
+ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.             *
+ *                                                                *
+ *****************************************************************/
+
+// Author: Michael Schneider
 
 #ifndef JSON_H
 #define JSON_H
@@ -85,7 +126,7 @@ static inline void j_set_bignum(json_t *j, const mpz_t num);
 static inline void j_set_double(json_t *j, double num);
 static inline json_t *j_set_object(json_t *j);
 static inline json_t *j_set_array(json_t *j);
-static inline void j_set_boolean(json_t *j, int bool);
+static inline void j_set_boolean(json_t *j, int boolean);
 static inline void j_set_true(json_t *j);
 static inline void j_set_false(json_t *j);
 static inline void j_set_null(json_t *j);
@@ -105,7 +146,7 @@ static inline void j_add_bignum(json_t *j, const char *name, const mpz_t num);
 static inline void j_add_double(json_t *j, const char *name, double num);
 static inline json_t *j_add_object(json_t *j, const char *name);
 static inline json_t *j_add_array(json_t *j, const char *name);
-static inline void j_add_boolean(json_t *j, const char *name, int bool);
+static inline void j_add_boolean(json_t *j, const char *name, int boolean);
 
 // arrays
 
@@ -136,15 +177,15 @@ void j_throw(json_t *j, const char *format, ...) __attribute__ ((format (printf,
 ////////////////////////////////////////////////////////////////////////////////
 
 #define j_error(...) { \
-      printf("j_error() at %s:%d in %s() ", __FILE__, __LINE__, __func__); \
-      printf(__VA_ARGS__);                                                 \
-      printf("\n");                                                        \
+      fprintf(stderr,"j_error() at %s:%d in %s() ", __FILE__, __LINE__, __func__); \
+      fprintf(stderr,__VA_ARGS__);                                                 \
+      fprintf(stderr,"\n");                                                        \
       abort(); }
 
 #define j_check(error_if_false, ...) if (!(error_if_false)) { \
-      printf("j_check(%s) failed at %s:%d in %s()", #error_if_false, __FILE__, __LINE__, __func__); \
-      printf(__VA_ARGS__);                                                                          \
-      printf("\n");                                                                                 \
+      fprintf(stderr,"j_check(%s) failed at %s:%d in %s()", #error_if_false, __FILE__, __LINE__, __func__); \
+      fprintf(stderr,__VA_ARGS__);                                                                          \
+      fprintf(stderr,"\n");                                                                                 \
       abort(); }
 
 #define SPRINTF(out, arg) { \
@@ -190,6 +231,7 @@ static inline int j_is_null(json_t *j)   { return !j || j->type == J_NULL; }
 
 static inline const char *j_get_string(json_t *j) {
     if (!j_is_string(j)) {
+        fprintf(stderr,"not a string!\n");
         j_throw(j, "expected string");
         return NULL;
     }
@@ -323,6 +365,14 @@ static inline void j_set_null(json_t *j) {
     if (j->string) { free(j->string); j->string = j->string_end = j->string_alloc_end = NULL; }
     if (j->bignum_initialized) { mpz_clear(j->bignum); j->bignum_initialized = 0; }
     if (j->orig_filename) { free(j->orig_filename); j->orig_filename = NULL; }
+    if (j->longjmp_string) {
+        fprintf(stderr, "in j_set_null, found initialized longjmp_string\n");
+        free(j->longjmp_string); j->longjmp_string = NULL; 
+    }
+    // if (j->longjmp_env) {
+    //     fprintf(stderr,"in j_set_null, found initialized longjmp_env\n");
+    //     fprintf(stderr,"jmp_buf is an array type, doesn't need to be freed?\n");
+    // }
     j->type = J_NULL;
 }
 
@@ -411,8 +461,8 @@ static inline json_t *j_add_array(json_t *j, const char *name) {
   return j_set_array(j_sub);
 }
 
-static inline void j_add_boolean(json_t *j, const char *name, int bool) {
-  j_set_boolean(j_key_add(j, name), bool);
+static inline void j_add_boolean(json_t *j, const char *name, int boolean) {
+  j_set_boolean(j_key_add(j, name), boolean);
 }
 
 
@@ -471,7 +521,7 @@ static inline int64_t j_array_get_length(json_t *j) {
             if (ee!=NULL) { \
                 *(ee) = j->longjmp_string; \
             } else { \
-                printf("EXCEPTION: %s\n",j->longjmp_string); \
+                fprintf(stderr,"EXCEPTION: %s\n",j->longjmp_string); \
                 free(j->longjmp_string); \
             } \
             j_set_null(j); \

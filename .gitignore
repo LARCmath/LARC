@@ -15,10 +15,9 @@ log/*
 out/*
 tests/out/*
 tests/dat/out/*
-src/_larc_py.so
+src/_larcSWIG.so
 *_wrap*
-src/larc_py.py
-tests/python/out/
+src/larcSWIG.py
 *.o
 *.pyc
 *foo*
@@ -26,3 +25,5 @@ tests/python/out/
 src/type.h
 build
 install
+html
+latex

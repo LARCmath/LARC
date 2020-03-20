@@ -90,7 +90,7 @@ ScalarType LARC_t::get ( uint64_t r , uint64_t c ) const
 
 void LARC_t::set ( uint64_t r , uint64_t c , ScalarType v )
 {
-  LARC_t temp = LARC_t ( matrix_set_value ( data_ref , r , c , v ) );
+  LARC_t temp = LARC_t ( get_matPTR_from_oldMatPTR_newVal_and_coords ( data_ref , r , c , v ) );
   std::swap ( this->data_ref , temp.data_ref );
 }
 
@@ -129,7 +129,7 @@ LARC_t operator* ( const LARC_t &op1 , const LARC_t &op2 )
 
 LARC_t operator*  ( ScalarType    op1 , const LARC_t &op2 )
 {
-  return LARC_t ( scalar_mult ( matrix_get_ptr_scalar ( op1 ) , op2.data_ref ) );
+  return LARC_t ( scalar_mult ( get_valMatPTR_from_val ( op1 ) , op2.data_ref ) );
 }
 
 LARC_t operator*  ( const LARC_t &op1 , ScalarType    op2 )
