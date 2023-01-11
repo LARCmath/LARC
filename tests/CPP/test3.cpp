@@ -48,7 +48,7 @@ int main ( int argc , char *argv[] )
 
       // Ensure that LARC_t sets holds on matrices
       if ( 0 == test_count % 5 )
-	clean_matrix_store ( );
+	clean_matrix_storage ( );
 
       for ( mat_level_t r = 0 ; r < 1 << row_level ; r++ ) 
 	for ( mat_level_t c = 0 ; c < 1 << row_level ; c++ ) {

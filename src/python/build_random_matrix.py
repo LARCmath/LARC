@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
- ##################################################################
+ #*################################################################
  #                                                                #
  # Copyright (C) 2014, Institute for Defense Analyses             #
  # 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           #
@@ -13,6 +13,7 @@
  #   - Steve Cuccaro (IDA-CCS)                                    #
  #   - John Daly (LPS)                                            #
  #   - John Gilbert (UCSB, IDA adjunct)                           #
+ #   - Mark Pleszkoch (IDA-CCS)                                   #
  #   - Jenny Zito (IDA-CCS)                                       #
  #                                                                #
  # Additional contributors are listed in "LARCcontributors".      #
@@ -50,7 +51,7 @@
  # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, #
  # EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.             #
  #                                                                #
- ##################################################################
+ #*################################################################
 
 from __future__ import print_function
 
@@ -60,6 +61,9 @@ sys.path.append(os.path.join(os.path.dirname(__file__),"../"))
 import pylarc
 import argparse
 
+## \file build_random_matrix.py
+#  \brief Generate a small random matrix and write to LARCMatrix file.
+#
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description="Generate a small random matrix and write to LARCMatrix file. Matrix scalar type will match current make settings.")
@@ -89,6 +93,6 @@ if __name__ == '__main__':
     randMatID = pylarc.matrix_random_matrixID(scalarTypeStr, args.row_level, args.col_level, args.range_min, args.range_max+1, args.sparsity)
 
     # write matrix to file
-    pylarc.write_larcMatrix_file_by_matID(randMatID, args.matrix_path)
+    pylarc.fprint_larcMatrixFile(randMatID, args.matrix_path)
 
 

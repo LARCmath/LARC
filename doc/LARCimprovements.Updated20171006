@@ -12,6 +12,7 @@
  *   - Steve Cuccaro (IDA-CCS)                                    *
  *   - John Daly (LPS)                                            *
  *   - John Gilbert (UCSB, IDA adjunct)                           *
+ *   - Mark Pleszkoch (IDA-CCS)                                   *
  *   - Jenny Zito (IDA-CCS)                                       *
  *                                                                *
  * Additional contributors are listed in "LARCcontributors".      *
@@ -61,6 +62,7 @@ Name GRCS -> LARC: Linear Algebra via Recursive Compression (Oct 2017)
   GRCS  = Global Recursive Compression Scheme
   for several reasons to something more simple before release.  
   The name with the most votes was suggested by John Gilbert
+ *   - Mark Pleszkoch (IDA-CCS)                                   *
   CLAMOR = Compressed Linear Algebra with Memoization Of Results.
   However, there was a big possibility this would create issues
   with the program CLAMR with is in the LANL git repository

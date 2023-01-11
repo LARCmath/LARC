@@ -48,7 +48,7 @@ int main ( int argc , char *argv[] )
 
       // Ensure that LARC_t sets holds on matrices
       if ( 0 == test_count % 5 )
-	clean_matrix_store ( );
+	clean_matrix_storage ( );
 
       for ( mat_level_t r = 0 ; r < 1 << row_level ; r++ ) 
 	for ( mat_level_t c = 0 ; c < 1 << col_level ; c++ ) 
@@ -59,7 +59,7 @@ int main ( int argc , char *argv[] )
   }
 
   // Ensure that LARC_t releases holds on matrices
-  clean_matrix_store ( );
+  clean_matrix_storage ( );
   uint64_t end_count = num_matrices_in_store ( );  
   assert_equal ( end_count , start_count , "matrix store clean up" );
 }

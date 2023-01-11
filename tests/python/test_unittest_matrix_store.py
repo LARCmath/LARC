@@ -3,7 +3,7 @@
 # NOTE: to run on command line
 #   python3 -m unittest -v test_unittest_matrix_store
 
- ##################################################################
+ #*################################################################
  #                                                                #
  # Copyright (C) 2014, Institute for Defense Analyses             #
  # 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           #
@@ -16,6 +16,7 @@
  #   - Steve Cuccaro (IDA-CCS)                                    #
  #   - John Daly (LPS)                                            #
  #   - John Gilbert (UCSB, IDA adjunct)                           #
+ #   - Mark Pleszkoch (IDA-CCS)                                   #
  #   - Jenny Zito (IDA-CCS)                                       #
  #                                                                #
  # Additional contributors are listed in "LARCcontributors".      #
@@ -53,7 +54,7 @@
  # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, #
  # EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.             #
  #                                                                #
- ##################################################################
+ #*################################################################
 
 from __future__ import print_function
 
@@ -69,7 +70,7 @@ class TestMacroFunctions(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         # in fear of memory leaks, we'll run this once per class. 
-        # with pylarc.stdout_redirected():
+        # with stdout_redirected():
         #    initialize_larc(26,24,10,-1,-1,1)
         initialize_larc(26,24,10,-1,-1,0)  # run quiet
         
@@ -84,8 +85,8 @@ class TestMacroFunctions(unittest.TestCase):
         """
         row_level = 3
         col_level = 4
-        randMatID = pylarc.matrix_random_matrixID(self.scalarType, row_level, col_level, 0, 100)
-        self.assertEqual(matrix_row_level_matrixID(randMatID), row_level)
+        randMatID = matrix_random_matrixID(self.scalarType, row_level, col_level, 0, 100)
+        self.assertEqual(matrix_row_level(randMatID), row_level)
 
     def test_col_level(self):
         """
@@ -93,8 +94,8 @@ class TestMacroFunctions(unittest.TestCase):
         """
         row_level = 3
         col_level = 4
-        randMatID = pylarc.matrix_random_matrixID(self.scalarType, row_level, col_level, 0, 100)
-        self.assertEqual(matrix_row_level_matrixID(randMatID), row_level)
+        randMatID = matrix_random_matrixID(self.scalarType, row_level, col_level, 0, 100)
+        self.assertEqual(matrix_row_level(randMatID), row_level)
 
     def test_sub_matrix(self):
         """
@@ -102,11 +103,11 @@ class TestMacroFunctions(unittest.TestCase):
         """
         row_level = 3
         col_level = 3
-        randMatID = pylarc.matrix_random_matrixID(self.scalarType, row_level, col_level, 0, 100, .5)
-        subMatID = matrix_sub_matrixID(randMatID, 0)
-        #print_naive_by_matID(randMatID)
-        #print_naive_by_matID(subMatID)
-        self.assertEqual(matrix_row_level_matrixID(subMatID), matrix_row_level_matrixID(randMatID)-1)
+        randMatID = matrix_random_matrixID(self.scalarType, row_level, col_level, 0, 100, .5)
+        subMatID = get_pID_of_indexed_submatrix(randMatID, 0)
+        #print_naive(randMatID)
+        #print_naive(subMatID)
+        self.assertEqual(matrix_row_level(subMatID), matrix_row_level(randMatID)-1)
 
 
 
@@ -116,7 +117,7 @@ class TestMatrixGetMatrixIDFromPanel(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         # in fear of memory leaks, we'll run this once per class. 
-        # with pylarc.stdout_redirected():
+        # with stdout_redirected():
         #    initialize_larc(26,24,10,-1,-1,1)
         initialize_larc(26,24,10,-1,-1,0)  # run quiet
 
@@ -131,9 +132,9 @@ class TestMatrixGetMatrixIDFromPanel(unittest.TestCase):
         should return the zero matrix of level 4.
         """
         level = 3
-        zeroMatID = pylarc.get_zero_matrixID(level, level)
-        bigZeroMatID = get_matID_from_four_subMatIDs(zeroMatID, zeroMatID, zeroMatID, zeroMatID, level+1, level+1)
-        self.assertEqual(bigZeroMatID, get_zero_matrixID(level+1, level+1))
+        zeroMatID = get_zero_pID(level, level)
+        bigZeroMatID = get_pID_from_four_sub_pIDs(zeroMatID, zeroMatID, zeroMatID, zeroMatID, level+1, level+1)
+        self.assertEqual(bigZeroMatID, get_zero_pID(level+1, level+1))
 
     def test_rebuild_rand_matrix(self):
         """
@@ -141,9 +142,9 @@ class TestMatrixGetMatrixIDFromPanel(unittest.TestCase):
         matrix.
         """
         level = 4
-        randMatID = pylarc.matrix_random_matrixID(self.scalarType, level, level, 0, 100, .5)
-        subMatIDs = [matrix_sub_matrixID(randMatID, i) for i in range(4)]
-        rebuildRandMatID = get_matID_from_four_subMatIDs(*(subMatIDs + [level, level]))
+        randMatID = matrix_random_matrixID(self.scalarType, level, level, 0, 100, .5)
+        subMatIDs = [get_pID_of_indexed_submatrix(randMatID, i) for i in range(4)]
+        rebuildRandMatID = get_pID_from_four_sub_pIDs(*(subMatIDs + [level, level]))
         self.assertEqual(randMatID, rebuildRandMatID)
 
     def test_row_vector(self):
@@ -152,9 +153,9 @@ class TestMatrixGetMatrixIDFromPanel(unittest.TestCase):
         """
         level = 4
         MATRIX_ID_INVALID = -1
-        zeroHalfVecID = pylarc.get_zero_matrixID(0, level-1)
-        zeroVecID = pylarc.get_zero_matrixID(0, level)
-        targetVecID = get_matID_from_four_subMatIDs(zeroHalfVecID, zeroHalfVecID, MATRIX_ID_INVALID, MATRIX_ID_INVALID, 0, level)
+        zeroHalfVecID = get_zero_pID(0, level-1)
+        zeroVecID = get_zero_pID(0, level)
+        targetVecID = get_pID_from_four_sub_pIDs(zeroHalfVecID, zeroHalfVecID, MATRIX_ID_INVALID, MATRIX_ID_INVALID, 0, level)
         self.assertEqual(zeroVecID, targetVecID)
 
     def test_col_vector(self):
@@ -163,9 +164,9 @@ class TestMatrixGetMatrixIDFromPanel(unittest.TestCase):
         """
         level = 4
         MATRIX_ID_INVALID = -1
-        zeroHalfVecID = pylarc.get_zero_matrixID(level-1, 0)
-        zeroVecID = pylarc.get_zero_matrixID(level, 0)
-        targetVecID = get_matID_from_four_subMatIDs(zeroHalfVecID, MATRIX_ID_INVALID, zeroHalfVecID, MATRIX_ID_INVALID, level, 0)
+        zeroHalfVecID = get_zero_pID(level-1, 0)
+        zeroVecID = get_zero_pID(level, 0)
+        targetVecID = get_pID_from_four_sub_pIDs(zeroHalfVecID, MATRIX_ID_INVALID, zeroHalfVecID, MATRIX_ID_INVALID, level, 0)
         self.assertEqual(zeroVecID, targetVecID)
 
 

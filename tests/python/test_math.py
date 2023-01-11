@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
- ##################################################################
+ #*################################################################
  #                                                                #
  # Copyright (C) 2014, Institute for Defense Analyses             #
  # 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           #
@@ -13,6 +13,7 @@
  #   - Steve Cuccaro (IDA-CCS)                                    #
  #   - John Daly (LPS)                                            #
  #   - John Gilbert (UCSB, IDA adjunct)                           #
+ #   - Mark Pleszkoch (IDA-CCS)                                   #
  #   - Jenny Zito (IDA-CCS)                                       #
  #                                                                #
  # Additional contributors are listed in "LARCcontributors".      #
@@ -50,7 +51,7 @@
  # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, #
  # EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.             #
  #                                                                #
- ##################################################################
+ #*################################################################
 
 from __future__ import print_function
 
@@ -71,11 +72,11 @@ if __name__ == '__main__':
     mat_store_exp = 26
     op_store_exp = 24
     max_level = 10
-    rnd_sig_bits = -1   # default value
-    trunc_to_zero_bits = -1  # default value
+    regionbitparam = -1   # default value
+    zeroregionbitparam = -1  # default value
     pylarc.create_report_thread(1800)
     verbose = 1
-    pylarc.initialize_larc(mat_store_exp,op_store_exp,max_level,rnd_sig_bits,trunc_to_zero_bits,verbose)
+    pylarc.initialize_larc(mat_store_exp,op_store_exp,max_level,regionbitparam,zeroregionbitparam,verbose)
 
     # Define string for using in formating filenames
     scalarTypeStr = pylarc.cvar.scalarTypeStr
@@ -83,39 +84,39 @@ if __name__ == '__main__':
     #  PLAYING WITH PREWRITTEN NONSQUARE MATRIX
     filename = "../dat/in/sample.1.2.%s.json" %scalarTypeStr
     print("About to test read %s\n" %filename)
-    samp_matrixID = pylarc.read_larcMatrix_file_return_matID(os.path.join(os.path.dirname(__file__),filename))
+    samp_matrixID = pylarc.read_larcMatrixFile(os.path.join(os.path.dirname(__file__),filename))
     print("We read in the LARCMatrix file\n")
-    pylarc.print_naive_by_matID(samp_matrixID)
+    pylarc.print_naive(samp_matrixID)
     
     print("does scalarM1_val print?")
     scalarM1_val = '-1'
     scalarM1_matrixID = pylarc.get_valID_from_valString(scalarM1_val)
-    pylarc.print_naive_by_matID(scalarM1_matrixID)
+    pylarc.print_naive(scalarM1_matrixID)
     
     print("testing scalar_mult:")
-    samp2_matrixID = pylarc.scalar_mult_matrixID(scalarM1_matrixID,samp_matrixID)
-    pylarc.print_naive_by_matID(samp2_matrixID)
+    samp2_matrixID = pylarc.scalar_mult(scalarM1_matrixID,samp_matrixID)
+    pylarc.print_naive(samp2_matrixID)
     
     print("testing addition:")
-    samp3_matrixID = pylarc.matrix_add_matrixID(samp_matrixID,samp2_matrixID)
-    pylarc.print_naive_by_matID(samp3_matrixID)
+    samp3_matrixID = pylarc.matrix_add(samp_matrixID,samp2_matrixID)
+    pylarc.print_naive(samp3_matrixID)
     
     print("testing adjoint:")
-    samp3_matrixID = pylarc.matrix_adjoint_matrixID(samp_matrixID)
-    pylarc.print_naive_by_matID(samp3_matrixID)
+    samp3_matrixID = pylarc.adjoint(samp_matrixID)
+    pylarc.print_naive(samp3_matrixID)
     
     print("testing non-square matrix mult:")
-    samp4_matrixID = pylarc.matrix_mult_matrixID(samp3_matrixID,samp_matrixID)
-    pylarc.print_naive_by_matID(samp4_matrixID)
+    samp4_matrixID = pylarc.matrix_mult(samp3_matrixID,samp_matrixID)
+    pylarc.print_naive(samp4_matrixID)
     print("")
-    samp4_matrixID = pylarc.matrix_mult_matrixID(samp_matrixID,samp3_matrixID)
-    pylarc.print_naive_by_matID(samp4_matrixID)
+    samp4_matrixID = pylarc.matrix_mult(samp_matrixID,samp3_matrixID)
+    pylarc.print_naive(samp4_matrixID)
     print("testing kron product:")
-    samp4_matrixID = pylarc.kronecker_product_matrixID(samp_matrixID,samp_matrixID)
-    pylarc.print_naive_by_matID(samp4_matrixID)
+    samp4_matrixID = pylarc.kronecker_product(samp_matrixID,samp_matrixID)
+    pylarc.print_naive(samp4_matrixID)
     print("testing join:")
-    samp4_matrixID = pylarc.join_matrixID(samp_matrixID,samp_matrixID)
-    pylarc.print_naive_by_matID(samp4_matrixID)
+    samp4_matrixID = pylarc.join(samp_matrixID,samp_matrixID)
+    pylarc.print_naive(samp4_matrixID)
     print("testing stack:")
-    samp4_matrixID = pylarc.stack_matrixID(samp_matrixID,samp_matrixID)
-    pylarc.print_naive_by_matID(samp4_matrixID)
+    samp4_matrixID = pylarc.stack(samp_matrixID,samp_matrixID)
+    pylarc.print_naive(samp4_matrixID)

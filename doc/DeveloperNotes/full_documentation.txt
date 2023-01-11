@@ -1,0 +1,19 @@
+This document discusses the documentation available in LARC
+===========================================================
+
+Our intent is that every function in LARC will have comments providing Doxygen
+documentation. However, we have intentionally limited the HTML documentation
+that is visible to the casual user of LARC to those routines which can be
+called safely from Python code. This means that by default the documentation
+for C routines which do not have SWIG wrappers is not shown. These routines
+generally work with pointers to structures, including scalarType variables (as
+multiprecision types are implemented as pointers) and pointers to matrices in
+the matrixStore.
+
+This does not mean that documentation is not available. Developers that want
+HTML documentation to be produced for these routines need to modify two lines
+in MyPyLARC/LARC/src/Doxyfile.in. The lines that begin with EXCLUDE_PATTERNS
+and EXCLUDE_SYMBOLS may be commented out to have access to all documentation in
+LARC. For many developers, this will produce more documentation than is needed,
+and they may wish to instead edit the exclusion lists to give them only the
+documentation that they need.

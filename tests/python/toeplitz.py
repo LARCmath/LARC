@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
- ##################################################################
+ #*################################################################
  #                                                                #
  # Copyright (C) 2014, Institute for Defense Analyses             #
  # 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           #
@@ -13,6 +13,7 @@
  #   - Steve Cuccaro (IDA-CCS)                                    #
  #   - John Daly (LPS)                                            #
  #   - John Gilbert (UCSB, IDA adjunct)                           #
+ #   - Mark Pleszkoch (IDA-CCS)                                   #
  #   - Jenny Zito (IDA-CCS)                                       #
  #                                                                #
  # Additional contributors are listed in "LARCcontributors".      #
@@ -50,7 +51,7 @@
  # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, #
  # EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.             #
  #                                                                #
- ##################################################################
+ #*################################################################
 
 from __future__ import print_function
 
@@ -58,7 +59,6 @@ import os
 import sys 
 sys.path.append(os.path.join(os.path.dirname(__file__),"../../src"))
 import pylarc
-# import python_utilities as exp
 import numpy as np
 import random
 from ctypes import *
@@ -72,11 +72,11 @@ if __name__ == '__main__':
     mat_store_exp = 26
     op_store_exp = 24
     max_level = 10
-    rnd_sig_bits = -1   # default value
-    trunc_to_zero_bits = -1  # default value
+    regionbitparam = -1   # default value
+    zeroregionbitparam = -1  # default value
     verbose = 1
     pylarc.create_report_thread(1800)
-    pylarc.initialize_larc(mat_store_exp,op_store_exp,max_level,rnd_sig_bits,trunc_to_zero_bits,verbose)
+    pylarc.initialize_larc(mat_store_exp,op_store_exp,max_level,regionbitparam,zeroregionbitparam,verbose)
 
     # In the Makefile you can compile with different scalarType values
     scalarTypeStr = pylarc.cvar.scalarTypeStr
@@ -110,14 +110,9 @@ if __name__ == '__main__':
         a.append(list(b[dim_whole-i-1:2*dim_whole-i-1]))
     # print("a: ", a)
     amat = np.matrix(a)
-    alist = amat.reshape(-1).tolist()[0]
-    #print alist
-    arr = pylarc.map_to_str(alist, scalarTypeStr)
-    # print 'arr:', pylarc.str_scalarTypeArray(arr, len(alist))
+    serial = pylarc.add_numpy_matrix_to_matrix_store(amat)
 
-    # creating or finding the matrix associated with the array
-    serial = pylarc.row_major_list_to_store_matrixID(arr, level, level, dim_whole)
     filename_json = "../dat/out/toeplitz.lev%d.%s.json" %(level,scalarTypeStr)
-    # pylarc.print_naive_by_matID(serial)
+    # pylarc.print_naive(serial)
     # print("\n")
-    pylarc.write_larcMatrix_file_by_matID(serial,os.path.join(os.path.dirname(__file__),filename_json))
+    pylarc.fprint_larcMatrixFile(serial,os.path.join(os.path.dirname(__file__),filename_json))

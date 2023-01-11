@@ -1,0 +1,9 @@
+To run all unit tests from this directory
+use the command:
+   python3 -m unittest discover -p 'test_unittest*.py'
+
+To run them from make at the LARC level just type
+   make unittests
+
+which will run:
+   python3 -m unittest discover -p 'test_unittest*.py' -s tests/python 2>> test_output

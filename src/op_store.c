@@ -13,6 +13,7 @@
  *   - Steve Cuccaro (IDA-CCS)                                    *
  *   - John Daly (LPS)                                            *
  *   - John Gilbert (UCSB, IDA adjunct)                           *
+ *   - Mark Pleszkoch (IDA-CCS)                                   *
  *   - Jenny Zito (IDA-CCS)                                       *
  *                                                                *
  * Additional contributors are listed in "LARCcontributors".      *
@@ -64,6 +65,13 @@
 #include "matrix_store.h"
 #include "op_store.h"
 
+/*!
+ * \file op_store.c
+ * \brief Contains the static data structure for the operations store and the
+ * functions which allow user access to the store
+ */
+
+
 /* Define the struct here as it doesn't need to be used elsewhere */
 static struct op_store_t {
   uint64_t longest;         // length in characters of longest op name
@@ -75,7 +83,7 @@ static struct op_store_t {
   hash_table_t *hash_table; // pointer to hash table for op_store
   uint64_t oprecords_total_created[INVALID_OP+1];
   uint64_t oprecords_stored_now[INVALID_OP+1];
-} store = {0};
+} op_store = {0};
 
 
 /* The types of operations to store (OPERATIONS is defined in op_store.h) */
@@ -113,13 +121,13 @@ op_store_report(char *outfilepath)
   int64_t size;
   fprintf(f,"\n");
   fprintf(f,"Op store report:\n");
-  size = hash_report(store.hash_table, f, 0);
+  size = hash_report(op_store.hash_table, f, 0);
   fprintf(f,"Statistics for each operation:\n");
   for (int i=0; i<INVALID_OP; ++i)
   {
-    fprintf(f,"%-14s: %12ld records created, %12ld current records\n",
-       op_names[i], store.oprecords_total_created[i],
-       store.oprecords_stored_now[i]);
+    fprintf(f,"%-14s: %12" PRIu64 " records created, %12" PRIu64 " current records\n",
+       op_names[i], op_store.oprecords_total_created[i],
+       op_store.oprecords_stored_now[i]);
   }
   fprintf(f,"Total Op Store size: %3.2fMB\n", size/(1024.0*1024.0));
   fflush(f);
@@ -129,220 +137,190 @@ op_store_report(char *outfilepath)
 int
 create_op_store(size_t exponent)
 {
-  memset(&store, 0, sizeof(store));
+  if (exponent>=64)
+  {
+    fprintf(stderr,"You have chosen an op store size of 2^64 or larger\n");
+    fprintf(stderr,"Too large... exiting\n");
+    exit(0);
+  }
+  memset(&op_store, 0, sizeof(op_store));
   for (int op = 0; op < INVALID_OP; op++)
   {
-    if (strlen(op_names_verbose[op]) > store.longest)
+    if (strlen(op_names_verbose[op]) > op_store.longest)
     {
-      store.longest = strlen(op_names_verbose[op]);
+      op_store.longest = strlen(op_names_verbose[op]);
     }
-    store.oprecords_total_created[op] = 0;
-    store.oprecords_stored_now[op] = 0;
+    op_store.oprecords_total_created[op] = 0;
+    op_store.oprecords_stored_now[op] = 0;
   }
-  store.exponent = exponent;
-  store.size = 1L << store.exponent;
-  store.hash_table = alloc_hash(exponent);
-  store.hash_table->record_size = sizeof(struct larc_op_t);
+  op_store.exponent = exponent;
+  op_store.size = (uint64_t)1 << op_store.exponent;
+  op_store.hash_table = alloc_hash(exponent);
+  op_store.hash_table->record_size = sizeof(struct larc_op_t);
   return 1;
 }
 
-/*!
- * \ingroup larc
- * \brief Produces a hash value from the three components of an operation
- * \param in1_mat_ptr The pointer to the first matrix
- * \param in2_mat_ptr The pointer to the second matrix
- * \param op_type The enum type for the operation to be stored
- * \return The desired hash value
- */
-static uint64_t 
-hash_from_op(mat_ptr_t in1_mat_ptr, mat_ptr_t in2_mat_ptr, op_type_t op_type) {
-  uint64_t hash = recursive_hash_from_three_integers((uint64_t)in1_mat_ptr, 
+size_t get_op_store_exp(void) {
+  return op_store.hash_table->exponent;
+}
+
+uint64_t
+hash_from_op(uint64_t in1_pID, uint64_t in2_pID, op_type_t op_type) {
+  uint64_t hash = recursive_hash_from_three_integers(in1_pID, 
                                           (uint64_t)op_type, 
-                                          (uint64_t)in2_mat_ptr, 
-                                          store.exponent);
+                                          in2_pID, op_store.exponent);
   return hash;
 }
-  
 
-/* Returns a pointer to the struct larc_op_t indicated by the two inputs 
- * If the two inputs don't match at their hash location, walk through
- * the hash chain structure and look until
- * the next available entry is found, or until the entire array has been
- * walked once (looping at the end) */
-struct larc_op_t *
-op_find(op_type_t op_type, mat_ptr_t in1_mat_ptr, mat_ptr_t in2_mat_ptr, int create_flag)
+int op_set(op_type_t op_type, uint64_t in1_pID, uint64_t in2_pID,
+           uint64_t out_pID, uint64_t hash)
 {
+// this function should be called whenever 
+// a) op_get has returned zero;
+// b) the operation has been performed and we have an answer
+// It adds the operation to the appropriate hash chain, creating it if necessary
+  if (op_type >= INVALID_OP) {
+    return EINVAL;
+  }
+
+  op_store.numsets++;
+
+  struct larc_op_t *op_rec_ptr = calloc(1,sizeof(struct larc_op_t));
+  if (op_rec_ptr == NULL) { ALLOCFAIL(); }
+  
+  op_rec_ptr->op_type = op_type;
+  op_rec_ptr->in1_pID = in1_pID;
+  op_rec_ptr->in2_pID = in2_pID;
+  op_rec_ptr->out_pID = out_pID;
+  op_store.oprecords_total_created[op_type]++;
+  op_store.oprecords_stored_now[op_type]++;
+
+#ifndef HASH_CHAIN_GROWS_AT_HEAD
+  // INSERT new items at tail of hash collision chain
+  hash_insert_at_tail(op_store.hash_table, (record_ptr_t) op_rec_ptr,
+                      MATRIX_ID_INVALID, hash);
+#endif
+#ifdef HASH_CHAIN_GROWS_AT_HEAD
+  // INSERT new items at head of hash collision chain
+  hash_insert_at_head(op_store.hash_table, (record_ptr_t) op_rec_ptr,
+                      MATRIX_ID_INVALID, hash);
+#endif
+
+  return 0;
+}
+
+int64_t op_get(op_type_t op_type, uint64_t in1_pID,
+                 uint64_t in2_pID, uint64_t hash)
+{
+  // if this operation has been done before,  the
+  // matrixID of the result will be returned;
+  // otherwise we get MATRIX_ID_INVALID
+
+  int64_t ret_ID = MATRIX_ID_INVALID;
+
+  if (op_type >= INVALID_OP) return ret_ID;
+
+  // this function returns a pointer to the op chain
+  // which for this op contains these two inputs
+
   int verbose = 0;
 
-  // test to see that op_type is valid
-  if (op_type == INVALID_OP) {
-    fprintf(stderr,"in %s, attempting to find and INVALID_OP\n",__func__);
-    exit(-1);
-  }
+  op_ptr_t op_rec_ptr = NULL;
 
-  uint64_t hash = hash_from_op(in1_mat_ptr, in2_mat_ptr, op_type);
-  if (verbose) {
-    printf("In %s, hash is %" PRIu64 "\n",__func__,hash);
-  }
+  if (verbose) printf("In %s, hash is %" PRIu64 "\n",__func__,hash);
 
-  // NOTE: misses and hits are incremented in places that call op_find
-  //       it would probably be better to 
 #ifdef HASHSTATS
-  if (create_flag == 0) {
-    (store.hash_table->num_accesses[hash])++;
-  }
+  (op_store.hash_table->num_accesses[hash])++;
 #endif
-  
+
   // find hash chain for this op containing this hash value,
   // if it exists
-  
-  if (verbose) {
-    printf("In %s, about to call hash_get_chain with op %d\n",__func__,op_type);
-  }
-  
-  hash_node_t *node_ptr = hash_get_chain(store.hash_table, hash);
-  
-  if (verbose) {
-    printf("In %s, returned from hash_get_chain\n",__func__);
-  }
-  
+
+  if (verbose) printf("In %s, about to call hash_get_chain with op %d\n",
+                      __func__,op_type);
+
+  hash_node_t *node_ptr = hash_get_chain(op_store.hash_table, hash);
+
+  if (verbose) printf("In %s, returned from hash_get_chain\n",__func__);
+
   //hash_node_t *last_zero_hit = NULL;
   int len = 0;
-  
-  if (verbose) {
-    printf("In %s, about to walk through chain\n",__func__);
-  }
-  
-#ifdef HASHSTATS
-  (store.hash_table->num_accesses[hash])++;
-#endif
 
+  if (verbose) printf("In %s, about to walk through chain\n",__func__);
+
+#ifdef HASHSTATS
+  (op_store.hash_table->num_accesses[hash])++;
+#endif
 
   // walk through hash chain, checking to see if the inputs
   // are present; if found, return the pointer to the larc_op_t
   // location
   while (node_ptr)
+  {
+    len++;
+    op_rec_ptr = (op_ptr_t) (node_ptr->record_ptr);
+
+    // take opportunity to clean obsolete nodes
+    if ( record_is_invalid(get_recordPTR_from_pID(op_rec_ptr->in1_pID,"first",__func__,0))
+         || record_is_invalid(get_recordPTR_from_pID(op_rec_ptr->in2_pID,"second",__func__,0))
+         || record_is_invalid(get_recordPTR_from_pID(op_rec_ptr->out_pID,"third",__func__,0))
+          )
     {
-      len++;
-      op_ptr_t current_op_ptr = (op_ptr_t) (node_ptr->record_ptr);
-      struct larc_op_t *op_rec_ptr = (struct larc_op_t *) current_op_ptr;
-      if (get_matID_from_matPTR(in1_mat_ptr) == op_rec_ptr->in1_matID 
-	  && get_matID_from_matPTR(in2_mat_ptr) == op_rec_ptr->in2_matID
+      // if you are going to remove the node, then you need to know what the
+      // previous node was  
+      hash_node_t *next_ptr = node_ptr->next;
+      // remove the node directly, stitching up the chain
+      hash_node_remove_node(op_store.hash_table,node_ptr,hash);
+      // keep statistics of nodes that have been removed
+      if (op_rec_ptr->op_type!=INVALID_OP)
+          op_store.oprecords_stored_now[op_rec_ptr->op_type]--;
+
+      //FREE RECORD FOR NODE
+      free(op_rec_ptr);
+      // change node pointer to the next node and start from top of loop
+      node_ptr = next_ptr;
+      continue;
+    } // if (record contains invalid matrix pointer)
+
+    // node has passed validity checks
+    if (in1_pID  == op_rec_ptr->in1_pID
+          && in2_pID == op_rec_ptr->in2_pID
           && op_type == op_rec_ptr->op_type)
-	{
-	  store.hash_table->hits++;
-	  node_ptr->hits++;
-	  return op_rec_ptr;
-	}
-      else {
-	if (
-	    matrix_is_invalid(get_matPTR_from_matID(op_rec_ptr->in1_matID,"first",__func__,0))
-	    || matrix_is_invalid(get_matPTR_from_matID(op_rec_ptr->in2_matID,"second",__func__,0))
-	    || matrix_is_invalid(get_matPTR_from_matID(op_rec_ptr->out_matID,"third",__func__,0))
-	    )
-	  {
-	    hash_node_remove(store.hash_table, (record_ptr_t)current_op_ptr, hash);
-	    //FREE RECORD FOR NODE;
-        free(op_rec_ptr);
-        }
-       }
-
-      //  This was going to be used so that we could truncate the 
-      //  end of the hash chain which would contain all nodes with zero hits
-      //if (node_ptr->hits == 0)
-	//last_zero_hit = node_ptr;
-      
-      node_ptr = node_ptr->next;
-    }
-  
-  if (verbose) {
-    printf("In %s, got through chain\n",__func__);
-  }
-  
-  // at this point we know the op is not in the op_store
-  // we either create a new larc_op_t, insert it in an old
-  // hash chain (or create a new hash chain for it), and
-  // return it to the calling routine, or if create_flag is
-  // zero we return zero.
-  store.hash_table->misses++;
-  if (create_flag)
     {
-      struct larc_op_t *op_rec_ptr = calloc(1, sizeof(struct larc_op_t));
-      // setup as invalid
-      op_rec_ptr->op_type = INVALID_OP;
-      op_rec_ptr->in1_matID=op_rec_ptr->in2_matID=op_rec_ptr->out_matID = MATRIX_ID_INVALID;
+      op_store.hash_table->hits++;
+      if (!node_ptr->hits_maxxed)
+      {
+        node_ptr->record_hits++;
+        if (node_ptr->record_hits == ((uint32_t) (-1)))
+              node_ptr->hits_maxxed = 1;
+      }
+      op_store.op_store_hits++;
+      ret_ID = op_rec_ptr->out_pID;
+      // node contains correct record, so stop traversing/searching chain
+      break;
+    } // if (node contains correct record)
 
-#ifndef HASH_CHAIN_GROWS_AT_HEAD
-      // INSERT new items at tail of hash collision chain
-      hash_insert_at_tail(store.hash_table, (record_ptr_t) op_rec_ptr, hash);
-#endif
-#ifdef HASH_CHAIN_GROWS_AT_HEAD
-      // INSERT new items at head of hash collision chain
-      hash_insert_at_head(store.hash_table, (record_ptr_t) op_rec_ptr, hash);
-#endif
-      
-      return op_rec_ptr;
-    }
-  return NULL;
-}
+    //  This was going to be used so that we could truncate the 
+    //  end of the hash chain which would contain all nodes with zero hits
+    //if (node_ptr->hits == 0) last_zero_hit = node_ptr;
 
+    // We move to the next record in the chain if the record checked
+    // is not the record we wanted.
+    node_ptr = node_ptr->next;
 
-int
-op_set(op_type_t op_type, mat_ptr_t in1_mat_ptr, mat_ptr_t in2_mat_ptr, mat_ptr_t out_mat_ptr)
-{
-// this function should be called whenever 
-// a) op_get has returned zero;
-// b) the operation has been performed and we have an answer
-// It adds the operation to the appropriate hash chain, creating
-// it if necessary
-	if (op_type >= INVALID_OP) {
-		return EINVAL;
-	}
+  } // END while (node_ptr)
 
-	store.numsets++;
+  if (node_ptr == NULL)
+  {
+    if (verbose) printf("In %s, got through chain\n",__func__);
 
-        // the "1" instructs op_find to create a new larc_op_t if needed
-	struct larc_op_t *op_rec_ptr = op_find(op_type, in1_mat_ptr, in2_mat_ptr, 1);
+    // at this point we know the op is not in the op_store
+    op_store.hash_table->misses++;
+    op_rec_ptr = NULL;
+    op_store.op_store_misses++;
+  }
 
-        // if a new larc_op_t has been created, need to initialize it?
-	if (op_rec_ptr->in1_matID != get_matID_from_matPTR(in1_mat_ptr) 
-	    || op_rec_ptr->in2_matID != get_matID_from_matPTR(in2_mat_ptr)
-            || op_rec_ptr->op_type == INVALID_OP) { 
-	  op_rec_ptr->in1_matID = get_matID_from_matPTR(in1_mat_ptr);
-	  op_rec_ptr->in2_matID = get_matID_from_matPTR(in2_mat_ptr);
-          op_rec_ptr->op_type = op_type;
-          store.oprecords_total_created[op_type]++;
-          store.oprecords_stored_now[op_type]++;
-	}
-	op_rec_ptr->out_matID = get_matID_from_matPTR(out_mat_ptr);
-
-	return 0;
-}
-
-mat_ptr_t
-op_get(op_type_t op_type, mat_ptr_t in1_mat_ptr, mat_ptr_t in2_mat_ptr)
-{
-        // if this operation has been done before,  the
-        // matrix_ptr of the result will be returned;
-        // otherwise we get MATRIX_PTR_INVALID
-	mat_ptr_t ret_mat_ptr = MATRIX_PTR_INVALID;
-
-	if (op_type >= INVALID_OP) {
-		return ret_mat_ptr;
-	}
-
-        // this function returns a pointer to the op chain
-        // which for this op contains these two inputs
-	struct larc_op_t *op_rec_ptr = op_find(op_type, in1_mat_ptr, in2_mat_ptr, 0);
-
-	if (op_rec_ptr != NULL) {
-	  store.op_store_hits++;
-	  ret_mat_ptr = get_matPTR_from_matID(op_rec_ptr->out_matID, "", __func__,0);
-	} else {
-	  store.op_store_misses++;
-	}
-
-	return ret_mat_ptr;
+  return ret_ID;
 }
 
 
@@ -357,55 +335,12 @@ op_type_t get_op_type_from_string_name(char *op_name)
   return (op_type);
 }
 
-
-/*****************************************************************
- *               op_hashID_by_matrixIDs                            *
- *  If this function succeeds it will return the hash value      *
- *  associated with hashing the operation                        *
- *         hash_from_op(in1_ptr, in2_ptr, op_type);              *
- *  where the in1_ptr is the matrix pointer associated with      *
- *  the matrix matrixID in1_mID, etc.                       *
- *  This function returns either a -1 if it fails because:       *
- *    - one of the matrixIDs is out of range, or            *
- *    - the matrix associated with a matrixID has been      *
- *      removed from the matrix store                            *
- *  Normally a hash is a uint64_t, but if there is a fail,       *
- *  the hashID can be -1, so the return value is int64_t.        *
- *  The user can call the function list_op_names()               *
- *****************************************************************/
-int64_t op_hashID_by_matrixIDs(int64_t in1_mID, int64_t in2_mID, char *op_name)
-{
-  // look up the matrix pointer corresponding to that matrixID
-  mat_ptr_t in1_ptr  = get_matPTR_from_matID(in1_mID, "first", __func__,0);
-  mat_ptr_t in2_ptr  = get_matPTR_from_matID(in2_mID, "second", __func__,0);
-
-  // check to see if this matrix has already been removed from the matrix store
-  if (in1_ptr == MATRIX_PTR_INVALID || in2_ptr == MATRIX_PTR_INVALID) {
-    return(-1);
-  }
-
-  // Getting the op_type_t from the op_name
-  op_type_t op_type = get_op_type_from_string_name(op_name);
-  if (op_type == INVALID_OP)
-  {
-    fprintf(stderr,"In %s: argument op_name\n\t%s\n",__func__,op_name);
-    fprintf(stderr," is not a valid operation\n");
-    exit(-1);
-  }
-
-  // calculate hash value for the operation of op_type
-  uint64_t hash = hash_from_op(in1_ptr, in2_ptr, op_type); 
-
-  return (int64_t)hash;
-}
-
-
 /****************************************************************************
 *                   op_hash_chain_info_to_file                              *
 *  This function prints information about op_store hash chain corresponding *
 *  to the given the hash value for that chain.                              *
 *  To get the appropriate hash value for the argument of this function      *
-*     hashID = op_hashID_by_matrixIDs(in1_mID, in2_mID, op_name);             *
+*     hashID = hash_from_op(in1_pID, in2_pID, op_name);             *
 *     op_type can be seen by ...                                            *
 *  The output file path and a user comment to be printed in the file are    *
 *  also arguments.                                                          * 
@@ -415,23 +350,23 @@ op_hash_chain_info_to_file(uint64_t hash, char *outfilepath, char *comment)
 {
   FILE *f; 
   if (strcmp(outfilepath,"stdout"))  {
-    printf("printing op store hash chain with hash value %ld to file %s\n",
+    printf("printing op store hash chain with hash value %" PRIu64 " to file %s\n",
 	   hash,outfilepath);  
      f = fopen(outfilepath, "w"); 
   }
   else {
-    printf("printing op store hash chain with hash value %ld to screen\n",hash);  
+    printf("printing op store hash chain with hash value %" PRIu64 " to screen\n",hash);  
     f = stdout;
   }
   
   int ret = 1;
   fprintf(f,"Comment: %s\n",comment);
-  fprintf(f,"This is the op_store hash chain info for hash value %ld\n", hash);
+  fprintf(f,"This is the op_store hash chain info for hash value %" PRIu64 "\n", hash);
   fprintf(f,"\n\n========================(Op Hash Chain)=============================\n");
   fprintf(f,"operation    matrixID In_1 matrixID In_2  matrixID Out\n");
 
   // get pointer to the head of hash chain from hash table
-  hash_table_t *table_ptr = store.hash_table;
+  hash_table_t *table_ptr = op_store.hash_table;
   hash_node_t *node_ptr = table_ptr->heads[hash];
   
   op_ptr_t record_ptr;
@@ -440,11 +375,13 @@ op_hash_chain_info_to_file(uint64_t hash, char *outfilepath, char *comment)
     record_ptr = (op_ptr_t) node_ptr->record_ptr; 
     
     // HEADER: "operation matrixID In_1 matrixID In_2  matrixID Out"
-    uint64_t in1_mID = record_ptr->in1_matID;
-    uint64_t in2_mID = record_ptr->in2_matID;
-    uint64_t out_mID = record_ptr->out_matID;
+    uint64_t in1_pID = record_ptr->in1_pID;
+    uint64_t in2_pID = record_ptr->in2_pID;
+    uint64_t out_pID = record_ptr->out_pID;
     op_type_t op_type = record_ptr->op_type;
-    fprintf(f,"%-12s %13lu %13lu %13lu \n",op_names[op_type],in1_mID, in2_mID, out_mID);
+    fprintf(f,"%-12s %13" PRIu64 " %13" PRIu64 " %13" PRIu64 " \n",
+            op_names[op_type], MID_FROM_PID(in1_pID), MID_FROM_PID(in2_pID),
+            MID_FROM_PID(out_pID));
 
     node_ptr = node_ptr->next;
   }
@@ -484,7 +421,7 @@ op_hash_chain_info_to_screen(uint64_t hash, char *comment)
 static int
 base_op_hash_clean(uint64_t hashID)
 {
-	hash_table_t *table_ptr = store.hash_table;
+	hash_table_t *table_ptr = op_store.hash_table;
 	hash_node_t *node_ptr = table_ptr->heads[hashID];
 	op_ptr_t current_op_ptr;
 	
@@ -493,23 +430,25 @@ base_op_hash_clean(uint64_t hashID)
 		current_op_ptr = (op_ptr_t) node_ptr->record_ptr;
 		struct larc_op_t *op_rec_ptr = (struct larc_op_t *) current_op_ptr;
         if (
-	    matrix_is_invalid(get_matPTR_from_matID(op_rec_ptr->in1_matID,"first",__func__,0))
-	    || matrix_is_invalid(get_matPTR_from_matID(op_rec_ptr->in2_matID,"second",__func__,0))
-	    || matrix_is_invalid(get_matPTR_from_matID(op_rec_ptr->out_matID,"third",__func__,0))
+	    record_is_invalid(get_recordPTR_from_pID(op_rec_ptr->in1_pID,"first",__func__,0))
+	    || record_is_invalid(get_recordPTR_from_pID(op_rec_ptr->in2_pID,"second",__func__,0))
+	    || record_is_invalid(get_recordPTR_from_pID(op_rec_ptr->out_pID,"third",__func__,0))
 	    )
 	    {
-			hash_node_remove(store.hash_table, (record_ptr_t)current_op_ptr, hashID);
-                        // keep statistics of nodes that have been removed 
-                        if (op_rec_ptr->op_type!=INVALID_OP)
-                          store.oprecords_stored_now[op_rec_ptr->op_type]--;
+               hash_node_remove(op_store.hash_table,
+                    (record_ptr_t)current_op_ptr, MATRIX_ID_INVALID,hashID);
+               // keep statistics of nodes that have been removed 
+               if (op_rec_ptr->op_type!=INVALID_OP)
+                  op_store.oprecords_stored_now[op_rec_ptr->op_type]--;
                         
-			// FREE RECORD FOR NODE;
+               // FREE RECORD FOR NODE;
 			free(op_rec_ptr);
-			}
-		//  TODO: Need to reset last_zero_hit after cleaning 
+            }
 
-		node_ptr = node_ptr->next;
-		}
+            //  TODO: Need to reset last_zero_hit after cleaning 
+
+            node_ptr = node_ptr->next;
+        }
 	return(1);
 }
 
@@ -522,7 +461,7 @@ base_op_hash_clean(uint64_t hashID)
 int
 clean_op_hash_chain(uint64_t hashID)
 {
-	uint64_t max = store.size;
+	uint64_t max = op_store.size;
 	if ((hashID < 0) || (hashID >= max)) {
 		fprintf(stderr,"Error: hash value out of range\n");
 		return(0);
@@ -542,7 +481,7 @@ clean_op_hash_chain(uint64_t hashID)
 int
 clean_op_store()
 {
-    uint64_t max = store.size;
+    uint64_t max = op_store.size;
     uint64_t hashID;
     for (hashID = 0; hashID < max; hashID ++){
         base_op_hash_clean(hashID);
@@ -559,9 +498,9 @@ clean_op_store()
  ***************************************************************************/
 int empty_op_store()
 {
-    uint64_t max = store.size;
+    uint64_t max = op_store.size;
     uint64_t hashID;
-    hash_table_t *table_ptr = store.hash_table;
+    hash_table_t *table_ptr = op_store.hash_table;
     for (hashID = 0; hashID < max; hashID ++){
 	hash_node_t *node_ptr = table_ptr->heads[hashID];
 	hash_node_t *next_node_ptr;
@@ -576,7 +515,12 @@ int empty_op_store()
             struct larc_op_t *op_rec_ptr = (struct larc_op_t *) current_op_ptr;
             // remove the node that stores this record in the store
             // but does not free the record itself
-            hash_node_remove(store.hash_table, (record_ptr_t) current_op_ptr, hashID);
+            hash_node_remove(op_store.hash_table, (record_ptr_t)current_op_ptr,
+                             MATRIX_ID_INVALID, hashID);
+            // keep statistics of nodes that have been removed 
+            if (op_rec_ptr->op_type!=INVALID_OP)
+                 op_store.oprecords_stored_now[op_rec_ptr->op_type]--;
+
 
             // FREE RECORD FOR NODE;
             free(op_rec_ptr);
@@ -586,11 +530,11 @@ int empty_op_store()
     }
 
     // reset counters in op store
-    store.numsets = 0;
-    store.op_store_hits = 0;
-    store.op_store_misses = 0;
-    memset(store.oprecords_total_created, 0x00, INVALID_OP + 1);
-    memset(store.oprecords_stored_now,    0x00, INVALID_OP + 1);
+    op_store.numsets = 0;
+    op_store.op_store_hits = 0;
+    op_store.op_store_misses = 0;
+    memset(op_store.oprecords_total_created, 0x00, (INVALID_OP + 1)*sizeof(uint64_t));
+    memset(op_store.oprecords_stored_now,    0x00, (INVALID_OP + 1)*sizeof(uint64_t));
 
     return 1;
 }
@@ -612,6 +556,33 @@ int empty_op_store()
  ************************************************************************/    
 void op_hashstats(char *accesses_file,  char *nodes_file, char *report_file)
 {
-  hashstats_to_files(store.hash_table, accesses_file, nodes_file, report_file);
+  hashstats_to_files(op_store.hash_table, accesses_file, nodes_file, report_file);
 }
 #endif
+
+void free_op_store(void)
+{
+    // free nodes from op_store hash table, along with the matrix record
+    // pointed to by each node. This routine should only be called as
+    // part of a LARC shutdown procedure.
+
+    // the op store struct only allocates the hash table. Each hash node
+    // allocates a record of type larc_op_t. There are no other allocations.
+
+    fprintf(stderr,"freeing memory for operationsStore structure\n");
+
+    uint64_t hashID;
+    hash_table_t *table_ptr = op_store.hash_table;
+    for (hashID = 0; hashID < op_store.size; hashID++)
+    {
+        hash_node_t *node_ptr = table_ptr->heads[hashID];
+        while (node_ptr)
+        {
+           hash_node_t *next_node_ptr = node_ptr->next;
+           free((op_ptr_t)(node_ptr->record_ptr));
+           free(node_ptr);
+           node_ptr = next_node_ptr;
+        }
+    }
+    dealloc_hash(op_store.hash_table);
+}

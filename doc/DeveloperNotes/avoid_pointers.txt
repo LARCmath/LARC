@@ -1,0 +1,30 @@
+Most functions in LARC have two versions, one which acts on matrix pointers
+and/or scalarType variables, and a wrapper function which acts on matrixIDs and
+scalars expressed in string format. The main reason for this is to provide
+access to our C routines from Python code. At least one of our scalarTypes
+(MPRATCOMPLEX) is a C structure created for LARC to have a complex number with
+real and imaginary rational number values, and passing a pointer to this structure
+back to Python and having the Python code do anything with it is problematic.
+
+However, it is better practice to use the matrixID versions even in C code.
+LARC has been designed so that matrixIDs are unique. Say that the scalar value
+1/sqrt{7} is stored in the matrixStore. Memory for a matrix pointer is
+allocated, and the value is assigned a matrixID, say 1207. If that matrix
+pointer is later cleaned from the store, its memory will be freed, and LARC
+will mark that the pointer for matrixID 1207 is invalid; attempts to access
+the store using this matrixID will fail. If later in the calculation 1/sqrt{7}
+is stored again, it will be assigned a different (larger) matrixID. This mechanism
+prevents accidental use of a matrix pointer that has been freed.
+
+In general, any function which has matrixIDs as an argument only wraps a 
+function which uses matrix pointers and calls only functions that use matrix
+pointers, so little efficiency is lost for this additional security. 
+
+
+We recommend that this practice be used when writing your own functions, even
+if you are not using Python (for which a matrixID wrapper function is
+necessary, since LARC doesn not allow the pointer functions to be called from
+Python). Best practice is to create and test a version of the function which
+uses matrix pointers and scalarType variables, but then create a wrapper which
+uses the matrixID for that matrix pointer. Use the matrixID version in code
+that calls the function, and pass that matrixID to any subsequent LARC functions.

@@ -1,0 +1,212 @@
+//                   LARCimprovements
+/******************************************************************
+ *                                                                *
+ * Copyright (C) 2014, Institute for Defense Analyses             *
+ * 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           *
+ * This material may be reproduced by or for the US Government    *
+ * pursuant to the copyright license under the clauses at DFARS   *
+ * 252.227-7013 and 252.227-7014.                                 *
+ *                                                                *
+ * LARC : Linear Algebra via Recursive Compression                *
+ * Authors:                                                       *
+ *   - Steve Cuccaro (IDA-CCS)                                    *
+ *   - John Daly (LPS)                                            *
+ *   - John Gilbert (UCSB, IDA adjunct)                           *
+ *   - Mark Pleszkoch (IDA-CCS)                                   *
+ *   - Jenny Zito (IDA-CCS)                                       *
+ *                                                                *
+ * Additional contributors are listed in "LARCcontributors".      *
+ *                                                                *
+ * Questions: larc@super.org                                      *
+ *                                                                *
+ * All rights reserved.                                           *
+ *                                                                *
+ * Redistribution and use in source and binary forms, with or     *
+ * without modification, are permitted provided that the          *
+ * following conditions are met:                                  *
+ *   - Redistribution of source code must retain the above        *
+ *     copyright notice, this list of conditions and the          *
+ *     following disclaimer.                                      *
+ *   - Redistribution in binary form must reproduce the above     *
+ *     copyright notice, this list of conditions and the          *
+ *     following disclaimer in the documentation and/or other     *
+ *     materials provided with the distribution.                  *
+ *   - Neither the name of the copyright holder nor the names of  *
+ *     its contributors may be used to endorse or promote         *
+ *     products derived from this software without specific prior *
+ *     written permission.                                        *
+ *                                                                *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND         *
+ * CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,    *
+ * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF       *
+ * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE       *
+ * DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT HOLDER NOR        *
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,   *
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT   *
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;   *
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)       *
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN      *
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR   *
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, *
+ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.             *
+ *                                                                *
+ *****************************************************************/
+
+This file describes the major changes in LARC from Mar 2020 to early June 2021.
+===============================================================================
+
+Summary of new features in the latest release:
+
+* a revised explanatory paper for LARC (and also the MyPyLARC package) is
+  provided with the MyPyLARC distribution, and is located at
+  MyPyLARC/doc/LARCandMyPyLARC_ver2.0_2021.pdf. The MyPyLARC distribution
+  is at GitHub/LARCmath/MyPyLARC.
+* a new "regional representative retrieval" scheme, "Multi-tile Assured
+  Retrieval" (the old, poorly-named "locality sensitive hash" scheme still
+  exists but has been renamed to "Single-tile Probabilistic Retrieval"). MAR
+  provides a guarantee of retrieving a scalar from the ScalarStore if one is
+  sufficiently close to a newly-calculated scalar.
+* new multiprecision scalarType Clifford (built on top of the MPRational type)
+  which allows exact calculation in several provided Clifford algebras and
+  also instructs the user on how to create additional algebras
+* new scalarTypes Upper and Lower, for approximate calculations involving
+  probability matrices.
+* added operating-system-specific configuration files so that Makefiles will be
+  usable in both Ubuntu and Centos (preliminary work on configuring for MacOS
+  is present but not finished).
+* added build notes to help users install LARC on their systems
+* many new Doxygen comments on LARC routines
+* general fixes to usability and improvements in efficiency
+
+Details by date ...
+
+June 2021:
+* for clarity, renamed get_valString_from_matID_and_coords to
+  get_readable_valString_from_matID_and_coords 
+* replaced outdated routine names in tests/python/test_cleaning.py
+
+May 2021:
+* added new data fields to InfoStore
+* some bounding code and InfoStore bug fixes
+* added warning to user if data being read is a different scalarType than
+  the one for which LARC is compiled
+
+April 2021:
+* tested and implemented (much of) new bounding scalarTypes
+* began work on separating ScalarStore out of MatrixStore (for efficiency
+  in memory use and matrix retrieval)
+* began work to get LARC to run on MacOS
+
+March 2021:
+* optimizations to operations store hash chain traversal
+* in order to save memory, MAR mode no longer stores (multiprecision) tile
+  indices
+* enabled reading of all Matrix Market types
+* started to add routines for new UPPER and LOWER types (used to find limited
+  precision upper and lower bounds to calculations)
+
+February 2021:
+* optimizations to SPR mode when attempting to locate a stored scalar near
+  to a newly calculated scalar
+* optimized MAR mode for smaller memory use by removing stored neighbor tile
+  records
+
+January 2021:
+* tested and implemented new Clifford algebra scalarType
+* began implementation of hashfilter, a small hash which will improve
+  efficiency of hash chain traversal when looking for previously stored
+  matrices or scalars
+* completed rename of old regional representative scheme, now called SPR
+
+December 2020:
+* began to add functions which output explanatory text
+* simplified Doxygen documentation by setting the default to exclude functions
+  that are not visible from the Python interface
+
+November 2020:
+* started to add routines for new Clifford algebra scalarType
+* bug fix: Matrix Market reader now exits gracefully on bad 'coordinate' input
+  which has two entries for the same (i,j) location.
+
+October 2020:
+* implemented early version of new Multi-tile Assured Retrieval (MAR) 
+  regional representative retrieval scheme (the old version is to be renamed
+  Single-tile Probabilistic Retrieval (SPR), as naming the scheme after the
+  hash function that is part of the scheme is not ideal)
+  - this involved changes throughout the LARC code base
+* added unit testing to check MAR boundaries
+* updated explanations of locality hashes to cover both retrieval schemes
+
+September 2020:
+* new functions apply_function_to_matrix_values_matPTR and *_matID added -
+  allows application of a user-written C function with scalarType argument to 
+  every scalar value in a given matrix. 
+  - This functionality was formerly kludged into LARC's read/write routines.
+    With the addition of this new function, the read/write functions no longer
+    change the data being read/written.
+* added developer doc about why it's a good idea to use the functions which
+  have MatrixIDs as arguments, rather than those that use matrix pointers.
+* updated exampleLARC.c to be more tutorial in function
+* improved comments on row major matrix reader
+* matrix_find_scalar() now checks that matrix is indeed a scalar,
+  along with other exception checks
+* removed define_sca_* functions, as that capability was never used without
+  continuing to fully add a new scalarType.
+* build notes updated
+* added more global multiprecision scratch variables to save on alloc/dealloc
+* bug fix: removed local declarations of global variables
+* bug fix: corrected calculation of zerorealthresh
+
+August 2020:
+* added global variables for dynamically choosing which SWIG wrappers to load
+  (relevant to packages that call LARC)
+* added functions to calculate the LARCsize of a matrix and save that value in
+  the InfoStore
+* more consistent naming of functions in src/python
+* removed obsolete non-memoized norm functions 
+* added comparision function emulating the MPC function mpc_cmp
+* type BOOLEAN added to replace complicated arithmetic switching code
+  - the new type is still a 64-bit integer, but different subroutines are 
+    called when doing add and multiply operations to perform OR and AND.
+* sca_get_exact_str() function added
+* list_block_diagonal_matrixIDs removed from LARC, added to MyPyLARC
+* removed obsolete precision tests from fft.c
+
+July 2020:
+* improved print output for complex types
+* fixed allocation bug in matrix market reader
+* added code for matrix market reader to handle all sparse input types
+* reworked documentation, function names so that advanced routines not visible
+  in documentation until user wants them to be
+* added ability to shut down and restart LARC within a process
+
+June 2020:
+* more improvements to use of multiprecision, switched from C double to
+  C long double when using REAL scalarType
+* changed Makefile.conf files to allow user to note where libraries are located
+  and removed hardcoded paths from Makefile
+* added build notes to make it easier for users to get LARC working on their
+  systems
+* added routines testing for values NaN, Infinity, Zero
+* even more Doxygen comments added
+
+May 2020:
+* lots of Doxygen comments added to both C and Python code
+* added Makefile.config file for Ubuntu
+* matrix market reader code now works properly for 'coordinate' data
+* fix to get_matPTR_single_nonzero_using_valPTR_at_coords
+* print_naive routines now more sensible about when not to print
+* fix to round_sig_fig_mpreal, larc_mpfr_hash (for MPREAL type) 
+* removed unnecessary conversions from multiprecision to C double and back,
+  improving the results from multiprecision calculations
+
+April 2020:
+* removed references to "neighborhood hashing", replaced with "locality hashing"
+* updated locality sensitive hash to make zero regions more consistent with
+  other regions, renamed some functions
+
+March 2020:
+* started use of local/Makefile.conf to make LARC more portable - currently
+  the configuration is for CentOS
+* removed memory leaks related to passing C strings to Python
+* added new memoized norm functions

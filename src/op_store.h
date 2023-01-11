@@ -13,6 +13,7 @@
  *   - Steve Cuccaro (IDA-CCS)                                    *
  *   - John Daly (LPS)                                            *
  *   - John Gilbert (UCSB, IDA adjunct)                           *
+ *   - Mark Pleszkoch (IDA-CCS)                                   *
  *   - Jenny Zito (IDA-CCS)                                       *
  *                                                                *
  * Additional contributors are listed in "LARCcontributors".      *
@@ -61,26 +62,50 @@
 
 /*!
  * \ingroup larc
- * \brief Adds an operation to the operations store
- *
- * \param op The type of operation to be added
- * \param in1 Pointer to the first matrix of the operation
- * \param in2 Pointer to the second matrix of the operation
- * \param out Pointer to the matrix created by the operation
- * \return 0 on success, or error code if failed 
+ * \brief Produces a hash value from the three components of an operation
+ * \param in1_pID The packedID of the first matrix/scalar
+ * \param in2_pID The packedID of the second matrix/scalar
+ * \param op_type The enum type for the operation to be stored
+ * \return The desired hash value
  */
-int op_set(op_type_t op, mat_ptr_t in1, mat_ptr_t in2, mat_ptr_t out);
+uint64_t
+hash_from_op(uint64_t in1_pID, uint64_t in2_pID, op_type_t op_type);
 
 /*!
  * \ingroup larc
- * \brief Retrieves the matrix pointer of an operation stored in the operations store
+ * \brief Returns enum value corresponding to operation, for hashing
+ * \param op_name String value for operation, e.g. "SUM".
+ * \return The integer enum value corresponding to the operation
+ */
+op_type_t get_op_type_from_string_name(char *op_name);
+
+/*!
+ * \ingroup larc
+ * \brief Adds an operation to the operations store
+ *
+ * \param op The type of operation to be added
+ * \param in1_pID packedID of the first matrix of the operation
+ * \param in2_pID packedID of the second matrix of the operation
+ * \param out_pID packedID of the matrix created by the operation
+ * \param hash Identifies the hash chain to which this operation will be added
+ *
+ * \return 0 on success, or error code if failed 
+ */
+int op_set(op_type_t op, uint64_t in1_pID, uint64_t in2_pID, uint64_t out_pID,
+	uint64_t hash);
+
+/*!
+ * \ingroup larc
+ * \brief Retrieves the packedID of the result of an operation stored in the operations store
  *
  * \param op The type of the operation
- * \param in1 Pointer to the first matrix of the operation
- * \param in2 Pointer to the second matrix of the operation
- * \return The matrix ID previously stored, or MATRIX_PTR_INVALID if not found
+ * \param in1_pID packedID of the first matrix of the operation
+ * \param in2_pID packedID of the second matrix of the operation
+ * \param hash Identifies the hash chain to be searched for the operation
+ * \return The packedID for the stored scalar or matrix, or MATRIX_ID_INVALID if not found
  */
-mat_ptr_t op_get(op_type_t op, mat_ptr_t in1, mat_ptr_t in2);
+int64_t op_get(op_type_t op, uint64_t in1_pID, uint64_t in2_pID,
+             uint64_t hash);
 
 /*!
  * \ingroup larc
@@ -88,6 +113,7 @@ mat_ptr_t op_get(op_type_t op, mat_ptr_t in1, mat_ptr_t in2);
  */
 void list_op_names();
 
+#ifndef SWIG
 /*!
  * \ingroup larc
  * \brief Creates the operations store
@@ -99,12 +125,29 @@ int create_op_store(size_t exponent);
 
 /*!
  * \ingroup larc
+ * \brief Frees memory allocated to the operations store
+ *
+ * This routine is called by shutdown_larc. It should not be called from
+ * any other routine.
+ */
+void free_op_store(void);
+#endif // #ifndef SWIG
+
+/*!
+ * \ingroup larc
+ * \brief Retrieve the exponent for the op store
+ * \return The exponent used to create the op store hash table
+ */
+size_t get_op_store_exp(void);
+
+/*!
+ * \ingroup larc
  * \brief Prints a summary of operations store usage
  * \param outfilepath The location for the report (can be "stdout")
  */
 void op_store_report(char *outfilepath);
 
-int64_t op_hashID_by_matrixIDs(int64_t in1_mID, int64_t in2_mID, char *op_name);
+//int64_t op_hashID_by_matrixIDs(int64_t in1_pID, int64_t in2_pID, char *op_name);
 
 /*!
  * \ingroup larc
@@ -174,6 +217,6 @@ int empty_op_store();
  * \param report_file
  */
 void op_hashstats(char *accesses_file,  char *nodes_file, char *report_file);
-#endif
+#endif // HASHSTATS
 
 #endif

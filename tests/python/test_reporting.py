@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
- ##################################################################
+ #*################################################################
  #                                                                #
  # Copyright (C) 2014, Institute for Defense Analyses             #
  # 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           #
@@ -13,6 +13,7 @@
  #   - Steve Cuccaro (IDA-CCS)                                    #
  #   - John Daly (LPS)                                            #
  #   - John Gilbert (UCSB, IDA adjunct)                           #
+ #   - Mark Pleszkoch (IDA-CCS)                                   #
  #   - Jenny Zito (IDA-CCS)                                       #
  #                                                                #
  # Additional contributors are listed in "LARCcontributors".      #
@@ -50,7 +51,7 @@
  # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, #
  # EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.             #
  #                                                                #
- ##################################################################
+ #*################################################################
 
 from __future__ import print_function
 
@@ -65,91 +66,66 @@ from ctypes import *
 
 if __name__ == '__main__':
 
-    #################################
-    ##   SET THESE PARAMETERS      ##
-    #################################
-    max_level = 8          ##  problem_size is always power of two!
+    #*###############################
+    #*   SET THESE PARAMETERS      #*
+    #*###############################
+    max_level = 8          #*  problem_size is always power of two!
+
+    #*#####################################
+    #*    Print baseline usage report    #*
+    #*#####################################
+    pylarc.memory_and_time_report(0, "stdout")
 
 
-    ####################################################
-    ##   Find out if machine is desktop workstation   ##
-    ##   or a CPU-cycle servers (cs1-cs6)             ##
-    ####################################################
-    machine = os.uname()[1]
-    cs = 0        # on desktop workstation, with smaller memory
-    if (machine.find('cs') >= 0):
-        cs = 1    # on CPU-cycle server cs1-cs6, with larger memory
-        print("This machine is a CPU-cycle server")
-    else:
-        print("This machine is a desktop work station")
+    #*##################################################################
+    #*    LARC  Initialization of Matrix Store and Operation Stores   #*
+    #*##################################################################
+    #* The routine initialize_larc() does the following:              #*
+    #* * creates the matrix and op stores                             #*
+    #* * preloads matrix store with: standard scalars and gates,      #*
+    #*   and with all zero, identity, and (integer) Hadamard matrices #*
+    #*   left to max matrix size                                      #*
+    #*##################################################################
+
+    #*##################################################################
+    #*    Testing to see what LSH function parameters we should use.  #*
+    #*    The zeroregionbitparam values that work for F_3 are:        #*
+    #*      -z 53 and smaller                                         #*
+    #*    The zeroregionbitparam values that fail for F_3 are:        #*
+    #*      -z 54 and larger                                          #*
+    #*                                                                #*
+    #*    The regionbitparam value has little effect, it              #*
+    #*    works in ranges -s 10 to -s 1000                            #*
+    #*                                                                #*
+    #*    The version of LARC post-April 2020 will ignore -z values   #*
+    #*    unless they are less than -s values.                        #*
+    #*##################################################################
 
 
-    #######################################
-    ##    Print baseline usage report    ##
-    #######################################
-    pylarc.rusage_report(0, "stdout")
 
-
-    ####################################################################
-    ##    LARCt Initialization of Matrix Store and Operation Stores   ##
-    ####################################################################
-    ## The routine initialize_larc() does the following:              ##
-    ## * creates the matrix and op stores                             ##
-    ## * preloads matrix store with: standard scalars and gates,      ##
-    ##   and with all zero, identity, and (integer) Hadamard matrices ##
-    ##   left to max matrix size                                      ##
-    ####################################################################
-
-    ####################################################################
-    ##    Testing to see what approximation functions.
-    ##    The zerobit thresh parameters that work for F_3 are:
-    ##      -z 53 and smaller
-    ##    The zerobit thresh parameters that fail for F_3 are:
-    ##      -z 54 and larger  
-    ## 
-    ##    The rounding function does not effect whether it
-    ##    works in ranges -s 10 to -s 1000
-    ## 
-    ## 
-    ####################################################################
-
-
-    ## SMALL STORES for working on desktop
+    #* SMALL STORES for working on desktop
     if max_level <= 8:    
         matrix_exponent = 22
         op_exponent = 19   
 
 
-        trunc_to_zero_bits = 54
-        rnd_sig_bits = 1000
+        zeroregionbitparam = 54
+        regionbitparam = 1000
 
-        ######################################################
-        ##  Sample failure values for LARC approximation    ##
-        ##  are to set         rnd_sig_bits = 60            ##
-        ##  and                trunc_to_zero_bits = 60      ##
-        ######################################################
-        ##  Default values for LARC approximation are       ##
-        ##  both equal to DBL_MANT_DIG -2                   ##
-        ##  rnd_sig_bits = -1    # default is 53 bits       ##
-        ##  trunc_to_zero_bits = -1 # OLD default is 1074 bits  ##
-        ##  trunc_to_zero_bits = -1 # OLD default is 1074 bits  ##
-        ##  NOTE:  testing shows -z 47 will work            ##
-        ######################################################
-        # trunc_to_zero_bits = 52
+        #*####################################################
+        #*  Sample failure values for LARC LSH parameters   #*
+        #*  are to set         regionbitparam = 60            #*
+        #*  and                zeroregionbitparam = 60      #*
+        #*####################################################
+        #*  Default values for LARC LSH parameters are      #*
+        #*  both equal to LDBL_MANT_DIG -2 when scalarType is Real #*
+        #*  regionbitparam = -1    #                        #*
+        #*  zeroregionbitparam = -1 # default is regionbitparam #*
+        #*  NOTE:  testing shows -z 47 will work            #*
+        #*####################################################
 
-
-        ######################################################
-
-        ##  TODO: find out the space in which this test fails!!!
-
-        ##  DBL_MANT_DIG is the number of digits in FLT_MANT  ##
-        ##  why aren't we using DBL_MANT_BITS  ??????? the number of bits
-        ##  used in the mantissa
-
-
-        ######################################################
         verbose = 1
-        pylarc.initialize_larc(matrix_exponent,op_exponent,max_level,rnd_sig_bits,trunc_to_zero_bits,verbose)
+        pylarc.initialize_larc(matrix_exponent,op_exponent,max_level,regionbitparam,zeroregionbitparam,verbose)
         pylarc.create_report_thread(180)
         print_naive = 0
         print_nonzeros = 0
@@ -162,18 +138,17 @@ if __name__ == '__main__':
            print("  will print files of nonzero matrices\n")
         else: 
            print("  not printing files of nonzero matrices\n")
-    ## LARGE STORES for cs1l,cs4l,cs9l
+    #* LARGE STORES
     else:      
-        ## matrix_exponent = 26
-        ## op_exponent = 24
+        #* matrix_exponent = 26
+        #* op_exponent = 24
         matrix_exponent = 30
         op_exponent = 31   
-        rnd_sig_bits = -1 # default value
-        trunc_to_zero_bits = -1 # default value
-        ## trunc_to_zero_bits = 20 # truncate to zero if value is less than 2**(-threshold)
-        ## trunc_to_zero_bits = 16 # truncate to zero if value is less than 2**(-threshold)
+        regionbitparam = -1 # default value
+        zeroregionbitparam = -1 # default value
+ 
         verbose = 1
-        pylarc.initialize_larc(matrix_exponent,op_exponent,max_level,rnd_sig_bits,trunc_to_zero_bits,verbose)
+        pylarc.initialize_larc(matrix_exponent,op_exponent,max_level,regionbitparam,zeroregionbitparam,verbose)
         pylarc.create_report_thread(3600)   # once per hour 3600
         print_naive = 0      
         print_nonzeros = 0
@@ -188,7 +163,7 @@ if __name__ == '__main__':
            print("  not printing files of nonzero matrices\n")
 
     print("Finished creating LARC matrix and op stores and loading basic matrices.\n")
-    print("Seppuku check to see if program is to large to occur once every 10 minutes.\n")
+    print("stopHogging check to see if program is too large, to occur once every 10 minutes.\n")
 
 
     
@@ -196,7 +171,7 @@ if __name__ == '__main__':
     scalarTypeStr = pylarc.cvar.scalarTypeStr
 
 
-    ##  START OF CODE STOLEN FROM toeplitz.py
+    #*  START OF CODE STOLEN FROM toeplitz.py
 
     # build array in C from Python list of scalars
     # print("Using row_major_list_to_store on data entered from python\n")
@@ -222,40 +197,35 @@ if __name__ == '__main__':
         a.append(list(b[dim_whole-i-1:2*dim_whole-i-1]))
     # print("a: ", a)
     amat = np.matrix(a)
-    alist = amat.reshape(-1).tolist()[0]
-    #print alist
-    arr = pylarc.map_to_str(alist, scalarTypeStr)
-    # print 'arr:', pylarc.str_scalarTypeArray(arr, len(alist))
+    top_ID = pylarc.add_numpy_matrix_to_matrix_store(amat)
 
-    # creating or finding the matrix associated with the array
-    top_ID = pylarc.row_major_list_to_store_matrixID(arr, level, level, dim_whole)
     # filename_json = "../dat/out/toeplitz.lev%d.%s.json" %(level,scalarTypeStr)
-    # pylarc.print_naive_by_matID(serial)
+    # pylarc.print_naive(serial)
     # print("\n")
-    # pylarc.write_larcMatrix_file_by_matID(serial,os.path.join(os.path.dirname(__file__),filename_json))
+    # pylarc.fprint_larcMatrixFile(serial,os.path.join(os.path.dirname(__file__),filename_json))
 
-    ##  END OF CODE STOLEN FROM toeplitz.py
+    #*  END OF CODE STOLEN FROM toeplitz.py
 
     # some operations to put in the store
-    A_ID = pylarc.matrix_add_matrixID(top_ID,top_ID)
-    B_ID = pylarc.matrix_mult_matrixID(A_ID,top_ID)
+    A_ID = pylarc.matrix_add(top_ID,top_ID)
+    B_ID = pylarc.matrix_mult(A_ID,top_ID)
     
 
 
 
-    # #############################
+    # #*###########################
     # # test reporting
-    # #############################
+    # #*###########################
     # pylarc.matrix_store_report("../dat/out/temp.mat_report")
     # pylarc.op_store_report("../dat/out/temp.op_report")
-    # pylarc.rusage_report(0,"../dat/out/temp.rusage0_report")
-    # pylarc.rusage_report(1,"../dat/out/temp.rusage1_report")
+    # pylarc.memory_and_time_report(0,"../dat/out/temp.rusage0_report")
+    # pylarc.memory_and_time_report(1,"../dat/out/temp.rusage1_report")
 
     print("\n")
     pylarc.matrix_store_report("stdout")
     print("\n")
     pylarc.op_store_report("stdout")
     print("\n")
-    pylarc.rusage_report(0,"stdout")
+    pylarc.memory_and_time_report(0,"stdout")
     print("\n")
-    pylarc.rusage_report(1,"stdout")
+    pylarc.memory_and_time_report(1,"stdout")

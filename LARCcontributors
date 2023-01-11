@@ -12,6 +12,7 @@
  *   - Steve Cuccaro (IDA-CCS)                                    *
  *   - John Daly (LPS)                                            *
  *   - John Gilbert (UCSB, IDA adjunct)                           *
+ *   - Mark Pleszkoch (IDA-CCS)                                   *
  *   - Jenny Zito (IDA-CCS)                                       *
  *                                                                *
  * Additional contributors are listed in "LARCcontributors".      *
@@ -57,12 +58,11 @@ adding additional capabilities, helping create
 the python SWIG wrapper, and working on applications 
 which utilize LARC as a math library.
 
-As of June 2019, these people include:
-Matt Calef, Bill Carlson, John Fregeau, Lisa Jones,
-Larry Hiller, James Howse, JKK, Steve Kratzer, 
-Laurie Law, Van Molino, Mark Motley, Mark Pleszkoch, 
-Michael Schneider, Doug Shors, Michelle Snider, 
-and Andy Wills.
+As of April 2021, these people include:
+Richard Bates, Matt Calef, Bill Carlson, John Fregeau,
+Lisa Jones, Larry Hiller, James Howse, JKK, Steve Kratzer,
+Laurie Law, Van Molino, Mark Motley, Michael Schneider,
+Doug Shors, Michelle Snider, and Andy Wills.
 
 If you would like to add code to LARC or make corrections
 please contact the authors at larc@super.org.  When you make
@@ -73,7 +73,6 @@ to you.
 
 Thank you!   
 
-  -- Steve Cuccaro, John Daly, John Gilbert, and Jenny Zito
-
+  -- Steve Cuccaro, John Daly, John Gilbert, Mark Pleszkoch, and Jenny Zito
 
 

@@ -63,7 +63,7 @@ int main ( int argc , char *argv[] )
   }
   
   // Ensure that LARC_t releases holds on matrices
-  clean_matrix_store ( );
+  clean_matrix_storage ( );
   uint64_t end_count = num_matrices_in_store ( );  
   assert_equal ( end_count , start_count , "verifying matrix store clean up" );
 }

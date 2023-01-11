@@ -1,5 +1,5 @@
 #              pylarc.py
-##################################################################
+#*################################################################
 #                                                                #
 # Copyright (C) 2014, Institute for Defense Analyses             #
 # 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           #
@@ -12,6 +12,7 @@
 #   - Steve Cuccaro (IDA-CCS)                                    #
 #   - John Daly (LPS)                                            #
 #   - John Gilbert (UCSB, IDA adjunct)                           #
+#   - Mark Pleszkoch (IDA-CCS)                                   #
 #   - Jenny Zito (IDA-CCS)                                       #
 #                                                                #
 # Additional contributors are listed in "LARCcontributors".      #
@@ -49,16 +50,30 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, #
 # EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.             #
 #                                                                #
-##################################################################
+#*################################################################
 
+from __future__ import print_function, division
+
+## \file pylarc.py
+#  \brief This module provides access to all the LARC C and Python code for
+#  those who run LARC directly (i.e., without a project package).
+#
+#  The module is set up so that all the LARC functions are in the pylarc.py
+#  namespace. It is mostly useful for LARC developers who want to run the
+#  unittests before making changes to LARC. Developers who create their own
+#  project packages will use an equivalent to pylarc.py in their project
+#  directories, which will give them single-namespace access to the C and
+#  Python code for their project as well as that for LARC.
 
 import os
 import sys
-# import random
-sys.path.append(os.path.join(os.path.dirname(__file__),"python"))
-from larcSWIG import *
-from python_utilities import *
-# from matrixUtils import *
-
-# from ctypes import *
-
+current_directory = os.path.dirname(__file__)
+# gv is in the current directory
+import gv
+# set the PATH_TO_SWIG variable to the current directory
+gv.PATH_TO_SWIG = current_directory
+# set SWIG_TO_USE to the name of the SWIG-generated python
+gv.SWIG_TO_USE = 'larcSWIG'
+# larc_utilities is in larc/src/python
+sys.path.append(os.path.join(current_directory,'python'))
+from larc_utilities import *

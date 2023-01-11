@@ -12,6 +12,7 @@
  *   - Steve Cuccaro (IDA-CCS)                                    *
  *   - John Daly (LPS)                                            *
  *   - John Gilbert (UCSB, IDA adjunct)                           *
+ *   - Mark Pleszkoch (IDA-CCS)                                   *
  *   - Jenny Zito (IDA-CCS)                                       *
  *                                                                *
  * Additional contributors are listed in "LARCcontributors".      *
@@ -68,8 +69,8 @@ void initialize ( )
   // Default hash exponent size
   size_t hash_exponent_matrix = DEFAULT_MATRIX_STORE_EXPONENT;
   size_t hash_exponent_op     = DEFAULT_OP_STORE_EXPONENT;
-  int    zerobitthresh        = ZEROBITTHRESH_DEFAULT;
-  int    sighash              = SIGHASH_DEFAULT;
+  int    sighash              = DEFAULT_REGIONBITPARAM;
+  int    zerobitthresh        = -1;
   mat_level_t max_level       = DEFAULT_MAX_LEVEL;
   int    verbose	      = 1;
 
@@ -86,41 +87,50 @@ int main ( int argc , char *argv[] )
   // Initialize the larc library.
   initialize ( );
   
+  scalarType one, counter, v;
+  sca_init(&one);
+  sca_init(&counter);
+  sca_init(&v);
+
   // Work with matrices of different sizes
   for ( mat_level_t row_level = 0 ; row_level < 4 ; row_level++ ) {
     for ( mat_level_t col_level = 0 ; col_level < 4 ; col_level++ ) {
 
-      mat_add_t m = get_zero_matrix_ptr ( row_level, col_level ); 
+      mat_ptr_t m = get_zero_matrix_ptr ( row_level, col_level ); 
+//      mat_ptr_t zPTR= get_zero_matrix_ptr (0,0);
+//      int64_t zID = get_matID_from_matPTR(zPTR);
 
-      ScalarType one     = (ScalarType) 1;
-      ScalarType counter = one;
+      sca_set_str(&one,"1");
+      sca_set(&counter,one);
 
-      for ( mat_level_t r = 0 ; r < 1 << row_level ; r++ ) {
-	for ( mat_level_t c = 0 ; c < 1 << col_level ; c++ ) {
+      for ( int r = 0 ; r < 1 << row_level ; r++ ) {
+	for ( int c = 0 ; c < 1 << col_level ; c++ ) {
 
-	  ScalarType v = matrix_get_value ( m , r , c );
-	  assert ( 0 == v );
+          get_valPTR_from_matPTR_and_coords(&v, m, r, c);
+	  assert ( sca_eq((scalarType)0, v ) );
 
-	  m = get_matPTR_from_oldMatPTR_newVal_and_coords ( m , r , c , counter );
+	  m = get_matPTR_from_oldMatPTR_newVal_and_coords (m, r, c, counter);
 
-	  counter = counter + one;
+          sca_add(&counter,counter,one);
 	}
       }
 
-      counter = one;
+      sca_set(&counter,one);
 
-      for ( mat_level_t r = 0 ; r < 1 << row_level ; r++ ) {
-	for ( mat_level_t c = 0 ; c < 1 << col_level ; c++ ) {
+      for ( int r = 0 ; r < 1 << row_level ; r++ ) {
+	for ( int c = 0 ; c < 1 << col_level ; c++ ) {
 
-	  ScalarType v = matrix_get_value ( m , r , c );
-
-	  assert ( counter == v );
+          get_valPTR_from_matPTR_and_coords(&v, m, r, c);
+	  assert ( sca_eq(counter,v) );
 	  
-	  counter = counter + one;
+          sca_add(&counter,counter,one);
 	}
       }
     }
   }
+  sca_clear(&one);
+  sca_clear(&counter);
+  sca_clear(&v);
 
   return 0;
 }

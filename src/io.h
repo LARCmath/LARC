@@ -12,6 +12,7 @@
  *   - Steve Cuccaro (IDA-CCS)                                    *
  *   - John Daly (LPS)                                            *
  *   - John Gilbert (UCSB, IDA adjunct)                           *
+ *   - Mark Pleszkoch (IDA-CCS)                                   *
  *   - Jenny Zito (IDA-CCS)                                       *
  *                                                                *
  * Additional contributors are listed in "LARCcontributors".      *
@@ -63,274 +64,158 @@
 
 #include "json.h"
 #include "larc.h"
+#include "scalars.h"
 #include "info_store.h"
 #include "matrix_store.h"
 
-
 /*!
  * \ingroup larc
- *
- * \brief Reads a file starting with the dimensions, followed by all entries.
- *
- * The entries are listed in the order you would get by reading each row in
- * turn
- *
- * \param file_path The path to the file to be read.
- * \return A pointer to the stored matrix.
- */
-mat_ptr_t read_row_major_matrix_from_file ( char * file_path); 
-
-/*!
- * \ingroup larc
- *
- * \brief Take a row major list descibing a matrix and put it in the store.
- *
- * This is a recursive routine, and requires the original number of columns
- * (the paramater dim_whole) at lower levels of the recursion.
- *
- * \param dense_mat A pointer to scalarType; the matrix to be stored
- * \param row_level The base2 log of the number of rows in the current matrix
- * \param col_level The base2 log of the number of columns in the current matrix
- * \param dim_whole The number of columns of the matrix originally passed to the recursion
- * \return A pointer to the stored matrix.
- */
-mat_ptr_t row_major_list_to_store(scalarType * dense_mat, 
-				  mat_level_t    row_level, 
-				  mat_level_t    col_level, 
-				  int64_t        dim_whole 
-				  );
-
-/*!
- * \ingroup larc
- * \brief Stores a formatted compressed LARCmatrix to a json file and applies
- * func to scalar entries before they are written.
- *
- * The function func() is applied to each scalar as it is written out to the
- * json file. The value of the scalar stored in the matrix store is unchanged.
- *
- * \param m_ptr The matrix pointer for the matrix to be written.
- * \param path The file to which the matrix will be written.
- * \param func A function that will be applied to each scalar before writing
- * \return A value indicating success or the type of error.
- */
-int write_and_alter_vals_larcMatrix_file(mat_ptr_t m_ptr, char *path, void (*func)(scalarType*, const scalarType));
-
-/*!
- * \ingroup larc
- * \brief Reads a LARCMatrix formatted compressed matrix from a json file and
- * applies func to scalar entries as they are read in.
- *
- * The function func() is applied to each scalar in the file before passing
- * it to the routines which put it into the matrix store (or find that the
- * modified value is already there...)
- *
- * \param path The filename of the LARCMatrix file to be read into LARC.
- * \param func A function that will be applied to each scalar before storing it
- * \return The pointer to the stored matrix.
- */
-mat_ptr_t read_and_alter_vals_larcMatrix_file_return_matPTR(char *path, void (*func)(scalarType*, const scalarType));
-
-#ifndef SWIG
-/*!
- * \ingroup larc
- * \brief Probably-obsolete function which reads in a matrix from a LARCMatrix json file, turning small scalars to zero before storing the matrix
- * \param path The location of the json file to be read
- * \param threshold The smallest scalarType value to not be zeroed
- * \return The pointer to the stored matrix
- */
-mat_ptr_t matrix_read_larcMatrix_file_zeroize_small_scalars(char *path, scalarType threshold);
-
-/*!
- * \ingroup larc
- * \brief Probably-obsolete function which reads in a matrix from a LARCMatrix json file and performs a flattening function to the data before storage
- * \param path The location of the json file to be read
- * \param threshold 
- * \param flatValue 
- * \return The pointer to the stored matrix
- */
-mat_ptr_t matrix_read_larcMatrix_file_flatten_small_scalars(char *path, scalarType threshold, scalarType flatValue);
-#endif // ifndef SWIG
-
-/*!
- * \ingroup larc
- * \brief Prints every entry of a SMALL matrix to screen by address
- * 
- * \param A_ptr The pointer to a matrix to be printed to the screen.
- */
-void print_naive_by_matPTR(mat_ptr_t A_ptr);
-
-/*!
- * \ingroup larc
- * \brief Stores a LARCMatrix formatted compressed matrix to a json file
- * 
- * \param id The pointer to a matrix to be stored.
- * \param path The filename the matrix will be written to.
- * \return A value indicating success or the type of error.
- */
-int write_larcMatrix_file_by_matPTR(mat_ptr_t id, char *path);
-
-/*!
- * \ingroup larc
- * \brief Stores a SMALL uncompressed matrix to a file
- * 
- * \param id The pointer to a matrix to be stored.
- * \param path The filename the matrix will be written to.
- */
-void write_naive_by_matPTR(mat_ptr_t id, char *path);
-
-/*!
- * \ingroup larc
- * \brief Stores the nonzero elements of a matrix and their positions to a file.
- * 
- * This routine should only be used for SMALL or VERY SPARSE matrices
- *
- * \param id The pointer to a matrix to be stored.
- * \param path The filename the matrix will be written to.
- */
-void write_matrix_nonzeros_by_matPTR(mat_ptr_t id, char *path);  
-
-/*!
- * \ingroup larc
- * \brief Reads a LARCMatrix formatted compressed matrix from a json file 
- * 
- * \param path The json file from which the matrix will be read.
- * \return The pointer to the stored matrix.
- */
-mat_ptr_t read_larcMatrix_file_return_matPTR(char *path);
-
-/*!
- * \ingroup larc
- * \brief Reads a LARCMatrix formatted compressed matrix from a json file 
- * 
- * This routine assumes the LARCMatrix file to be in an older format, in which
- * the scalar values are not stored as strings. It is in LARC to maintain
- * backwards compatibility.
- *
- * \param path The json file from which the matrix will be read.
- * \return The pointer to the stored matrix.
- */
-mat_ptr_t read_larcMatrix_file_legacy_return_matPTR(char *path);
-
-/*!
- * \ingroup larc
- * \brief Python interface version of read_row_major_matrix_from_file
+ * \brief Reads a matrix represented in row major format from a file and adds it to the MatrixStore
  * 
  * \param file_path The file from which the matrix will be read.
- * \return The matrixID of the stored matrix.
+ * \return The packedID of the stored matrix.
  */
-int64_t read_row_major_matrix_from_file_matrixID(char * file_path);
+int64_t read_row_major_matrix_from_file(char * file_path);
 
 /*!
  * \ingroup larc
- * \brief Python interface version of row_major_list_to_store
+ * \brief Adds an array of values (in string form) held in memory to the MatrixStore
  * 
- * The parameters for this routine mirror those of row_major_list_to_store
- * (somewhat unnecessarily, since the _matrixID routine is not recursive).
+ * The parameters for this routine mirror those of
+ * recursive_row_major_list_to_store except that the matrix is made up of
+ * character strings rather than scalarType values
  *
  * \param dense_mat The matrix to be stored, with character strings as elements
  * \param current_row_level The row level of the matrix
  * \param current_col_level The column level of the matrix
  * \param orig_num_cols The number of columns of the matrix
  *
- * \return The matrixID of the stored matrix.
+ * \return The packedID of the stored matrix.
  */
-int64_t row_major_list_to_store_matrixID(char **dense_mat, 
-				       mat_level_t        current_row_level, 
-				       mat_level_t        current_col_level, 
-				       int64_t        orig_num_cols 
-				       );
+int64_t row_major_list_to_store(char **dense_mat, 
+				       mat_level_t  current_row_level, 
+				       mat_level_t  current_col_level, 
+				       int64_t  orig_num_cols );
 
 /*!
  * \ingroup larc
- * \brief Python Interface: Prints every entry of a SMALL matrix to screen
+ * \brief Prints every entry of a SMALL matrix to screen
  *
- * \param A_mID The matrix ID of the matrix to be printed to the screen.
+ * \param A_pID The packedID of the matrix to be printed to the screen.
  */
-void print_naive_by_matID(int64_t A_mID);
+void print_naive(int64_t A_pID);
 
 /*!
  * \ingroup larc
- * \brief Python Interface: Stores a LARCMatrix formatted compressed matrix to a json file
- *
- * \param m_mID The matrixID of the matrix to be stored in compressed format.
- * \param path The path to the file that will be created.
- * \return A value indicating success or the type of error.
- */
-int write_larcMatrix_file_by_matID(int64_t m_mID, char *path);
-
-/*!
- * \ingroup larc
- * \brief Python interface: Prints every entry of a SMALL matrix to a file
+ * \brief Prints every entry of a SMALL matrix to a file
  * 
- * \param id The matrixID of the matrix to be stored (uncompressed!)
+ * \param A_pID The packedID of the matrix to be stored (uncompressed!)
  * \param path The path to the file that will be created.
  */
-void write_naive_by_matID(int64_t id, char *path);
+void fprint_naive(int64_t A_pID, char *path);
 
 /*!
  * \ingroup larc
- * \brief Python interface: Prints nonzero entries of a SMALL or VERY SPARSE matrix to a file
+ * \brief Prints nonzero entries of a SMALL or VERY SPARSE matrix to a file
  *
- * \param id The matrixID of the matrix to be stored.
+ * \param A_pID The packedID of the matrix to be stored.
  * \param path The path to the file that will be created.
  */
-void write_matrix_nonzeros_by_matID(int64_t id, char *path);  
+void fprint_matrix_nonzeros(int64_t A_pID, char *path);  
 
 /*!
  * \ingroup larc
- * \brief Python interface: Reads a larcMatrix formatted compressed matrix from a json file
+ * \brief Reads a larcMatrix formatted compressed matrix from a json file and adds it to the MatrixStore
  *
- * \param path The path to the json file to be read into the matrix store
- * \return The matrixID of the stored file
+ * This routine assumes that the LARCMatrix file is line-by-line,
+ * character-by-character equivalent
+ * to what the fprint_larcMatrixFile() function produces.
+ *
+ * \param path The path to the json file to be read into the MatrixStore
+ * \return The packedID of the stored file
  */
-int64_t read_larcMatrix_file_return_matID(char *path);
+int64_t read_larcMatrixFile(char *path);
 
 /*!
  * \ingroup larc
- * \brief Python interface: Reads a LARCMatrix formatted compressed matrix from a json file
+ * \brief Reads a larcMatrix formatted compressed matrix from a json file and adds it to the MatrixStore
+ *
+ * This routine can handle a JSON file that is *not* line-by-line,
+ * character-by-character equivalent
+ * to what the fprint_larcMatrixFile() function produces. Because of its
+ * generality, it requires substantially more resources than the default
+ * read_larcMatrixFile() routine.
+ *
+ * \param path The path to the json file to be read into the MatrixStore
+ * \return The packedID of the stored file
+ */
+int64_t read_anyFormat_larcMatrixFile(char *path);
+
+/*!
+ * \ingroup larc
+ * \brief Reads a LARCMatrix formatted compressed matrix from a json file and adds it to the MatrixStore
  *
  * This routine assumes the LARCMatrix file to be in an older format, in which
  * the scalar values are not stored as strings. It is in LARC to maintain
- * backwards compatibility.
+ * backwards compatibility. Like the read_anyFormat_larcMatrixFile() routine,
+ * it uses a general JSON reader and may require substantially more resources
+ * than one would expect for the read_larcMatrixFile() routine.
  *
- * \param path The path to the json file to be read into the matrix store
- * \return The matrixID of the stored file
+ * \param path The path to the json file to be read into the MatrixStore
+ * \return The packedID of the stored file
  */
-int64_t read_larcMatrix_file_legacy_return_matID(char *path);
+int64_t read_legacy_larcMatrixFile(char *path);
 
 /*!
  * \ingroup larc
- * \brief Python interface: checks two LARCMatrix json files to see if they contain the same matrix
+ * \brief checks two LARCMatrix json files to see if they contain the same matrix
  *
- * The compressed LARCMatrix file format refers to matrices by matrixID, which even
- * for identical matrices may vary depending on the order in which matrices
- * were stored for a particular program run. This routine reads both matrices
- * into the same matrix store to see if the returned matrixIDs are the same.
+ * The legacy compressed LARCMatrix file format refers to matrices by matrixID,
+ * which even for identical matrices may vary depending on the order in
+ * which matrices were stored for a particular program run. This routine reads
+ * both matrices into the same MatrixStore to see if the returned packedIDs
+ * are the same.
+ *
+ * If the files were written in the newer sequentially-numbered format, then
+ * they will have identical matrix records (there may be some differences in
+ * InfoStore fields) and this program is not needed.
  *
  * \param path1 The path to the first json file
  * \param path2 The path to the second json file
- * \return The matrixID for the matrices if they are the same, 0 otherwise
+ * \return The packedID for the matrices if they are the same, 0 otherwise
  */
 int64_t equal_matrices_in_larcMatrix_files(char *path1, char *path2);
 
+/*!
+ * \ingroup larc
+ * \brief Reads a matrix represented in Matrix Market Exchange format from a file and adds it to the MatrixStore
+ * 
+ * \param file_path The file from which the matrix will be read.
+ * \return The packedID of the stored matrix.
+ */
+int64_t read_matrixMarketExchange_file(char * file_path);
+
+/*!
+ * \ingroup larc
+ * \brief Writes a LARCmatrix to a file and returns the LARCsize
+ *
+ * \param m_pID The packedID of the matrix to be written in LARC format
+ * \param path The location of the new larcMatrix json file
+ * \return The larcSize of the matrix with packedID m_pID
+ */
+size_t fprint_larcMatrixFile(int64_t m_pID, char *path);
 
 
-// THE FOLLOWING FUNCTIONS NEED DOXYGEN HEADERSL
+/*!
+ * \ingroup larc
+ * \brief Writes a file with unique scalars in a matrix and a file with infostore metadata.
+ *
+ * \param m_pID The packedID whose scalars will be listed in one file, and metadata in other.
+ * \param path File for list of scalars is path. File for meta data has ".info" suffix to path.
+ * \return The number of unique scalars in the matrix.
+ */
+size_t fprint_uniqScalar_file(int64_t m_pID, char *path);
 
-int64_t matrix_read_larcMatrix_file_zeroize_small_scalars_matrixID(char *path, char *threshold);
-
-int64_t matrix_read_larcMatrix_file_flatten_small_scalars_matrixID(char *path, char *threshold, char *flatValue);
-
-mat_ptr_t read_matrixMarketExchange_file_return_matPTR(char * file_path);
-
-size_t write_larcMatrix_file_return_larcSize(mat_ptr_t m_ptr, char *path,
-							 void (*func)(scalarType*,
-							 const scalarType));
-
-
-size_t write_larcMatrix_file_return_larcSize_by_matID(int64_t m_mID, char *path);
-
-size_t write_larcMatrix_file_return_larcSize_by_matPTR(mat_ptr_t m_ptr, char *path);
 
 
 #endif

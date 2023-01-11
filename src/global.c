@@ -12,6 +12,7 @@
  *   - Steve Cuccaro (IDA-CCS)                                    *
  *   - John Daly (LPS)                                            *
  *   - John Gilbert (UCSB, IDA adjunct)                           *
+ *   - Mark Pleszkoch (IDA-CCS)                                   *
  *   - Jenny Zito (IDA-CCS)                                       *
  *                                                                *
  * Additional contributors are listed in "LARCcontributors".      *
@@ -55,8 +56,15 @@
 #include "global.h"
 #include "matrix_store.h"
 #include "scalars.h"
+#include "mar.h"
 
-pthread_t thd;
+/*!
+ * \file global.c
+ * \brief This file contains the global variables used by LARC and also
+ * functions which initialize them.
+ */
+
+const mpfr_prec_t mpreal_precision = 256;
 
 // this passes information to python about current scalarType
 char scalarTypeDef;
@@ -64,43 +72,58 @@ char *scalarTypeStr;
 #ifdef USE_INTEGER
 char scalarTypeDef = 'i';
 char *scalarTypeStr = "Integer";
-#endif
+#endif // USE_INTEGER
+#ifdef USE_BOOLEAN
+char scalarTypeDef = 'b';
+char *scalarTypeStr = "Boolean";
+#endif // USE_BOOLEAN
 #ifdef USE_COMPLEX
 char scalarTypeDef = 'c';
 char *scalarTypeStr = "Complex";
-#endif
+#endif // USE_COMPLEX
 #ifdef USE_REAL
 char scalarTypeDef = 'r';
 char *scalarTypeStr = "Real";
-#endif
+#endif // USE_REAL
 #ifdef USE_MPINTEGER
 char scalarTypeDef = 'z';
 char *scalarTypeStr = "MPInteger";
-#endif
+#endif // USE_MPINTEGER
 #ifdef USE_MPRATIONAL
 char scalarTypeDef = 'q';
 char *scalarTypeStr = "MPRational";
-#endif
+#endif // USE_MPRATIONAL
 #ifdef USE_MPRATCOMPLEX
 char scalarTypeDef = 'v';
 char *scalarTypeStr = "MPRatComplex";
-#endif
+#endif // USE_MPRATCOMPLEX
 #ifdef USE_MPREAL
 char scalarTypeDef = 'm';
 char *scalarTypeStr = "MPReal";
-#endif
+#endif // USE_MPREAL
 #ifdef USE_MPCOMPLEX
 char scalarTypeDef = 'j';
 char *scalarTypeStr = "MPComplex";
-#endif
-
+#endif // USE_MPCOMPLEX
+#ifdef USE_CLIFFORD
+char scalarTypeDef = 'a';
+char *scalarTypeStr = "Clifford";
+#endif // USE_CLIFFORD
+#ifdef USE_LOWER
+char scalarTypeDef = 'l';
+char *scalarTypeStr = "Lower";
+#endif // USE_LOWER
+#ifdef USE_UPPER
+char scalarTypeDef = 'u';
+char *scalarTypeStr = "Upper";
+#endif // USE_UPPER
 
 scratchVars_t scratchVars = {0};
 
 void scratchVars_init()
 {
     // Note that scalar routines need to be loaded before this can be run. 
-    if (1 != check_scalarOps()){
+    if (sca_init == NULL){
         fprintf(stderr,"Scalar ops must be initialized before running matrix math routines.\n");
         exit(1);
     }
@@ -108,22 +131,40 @@ void scratchVars_init()
     scratchVars.top_level = -1;
 
     sca_init(&scratchVars.submit_to_store);
+    scratchVars.submit_to_store_in_use = 0;
     sca_init(&scratchVars.calc_conj);
+    scratchVars.calc_conj_in_use = 0;
     sca_init(&scratchVars.quick_use);
+    scratchVars.quick_use_in_use = 0;
     sca_init(&scratchVars.misc);
+    scratchVars.misc_in_use = 0;
     sca_init(&scratchVars.approx_value);
+    scratchVars.approx_value_in_use = 0;
 
     mpz_init(scratchVars.counter);
-#if defined(USE_MPRATIONAL) || defined(USE_MPRATCOMPLEX) || defined(USE_MPREAL) || defined(USE_MPCOMPLEX)
+    scratchVars.counter_in_use = 0;
     mpz_init(scratchVars.mpinteger);
-#endif
-#if defined(USE_MPRATIONAL) || defined(USE_MPRATCOMPLEX)
+    scratchVars.mpinteger_in_use = 0;
     mpq_init(scratchVars.mprational);
-#endif
-#if defined(USE_MPINTEGER) || defined(USE_MPREAL) || defined(USE_MPCOMPLEX)
-    mpfr_prec_t mpreal_precision = 256;
+    scratchVars.mprational_in_use = 0;
+    mpq_init(scratchVars.mprational2);
+    scratchVars.mprational2_in_use = 0;
     mpfr_init2(scratchVars.mpreal, mpreal_precision);
-#endif
+    scratchVars.mpreal_in_use = 0;
+#ifdef USE_CLIFFORD
+    larc_sca_init_clifford(&(scratchVars.clifford));
+    scratchVars.clifford_in_use = 0;
+    for (int i=0; i<CLIFFORD_DIMENSION-1; ++i)
+    {
+        mpfr_init(mpfr_algebraic_approx[i]);
+        mpq_init(mpq_algebraic_approx[i]);
+    }
+#endif // USE_CLIFFORD
+
+#ifdef MAR
+    scratchVars_mar_init();
+#endif // MARmode
+    
 }
 
 void scratchVars_exitroutine(mat_level_t current_level)
@@ -137,10 +178,6 @@ void scratchVars_exitroutine(mat_level_t current_level)
  * FREQUENTLY USED SCALARS ARE GIVEN GLOBAL NAMES *
  ***************************************************/
 
-#define M_SQRT1_2L      0.7071067811865475244008443621048490L  /* 1/sqrt(2) */
-#define M_SQRT1_2S     "0.7071067811865475244008443621048490392848359376884740365883398689953662392310510"  /* 1/sqrt(2) */
-
-
 /*********************************************
  *       values of SCALAR type               * 
  *********************************************/
@@ -148,20 +185,15 @@ void scratchVars_exitroutine(mat_level_t current_level)
 scalarType scalar0;
 scalarType scalar1;
 scalarType scalarM1; //'minus 1'
-#if defined(USE_REAL) || defined(USE_COMPLEX) || defined(USE_MPREAL) || defined(USE_MPCOMPLEX) || defined(USE_MPRATIONAL) || defined(USE_MPRATCOMPLEX)
+#ifndef IS_INTEGER
 scalarType scalar0_5;
 scalarType scalarM0_5;
-scalarType scalar_inv_sqrt_2;
-scalarType scalar_neg_inv_sqrt_2;
 #endif
-#if defined(USE_COMPLEX) || defined(USE_MPCOMPLEX) || defined(USE_MPRATCOMPLEX)
+#ifdef IS_COMPLEX
 scalarType scalar0i1;
 scalarType scalar0iM1;
 scalarType scalar0i0_5;
 scalarType scalar0iM0_5;
-scalarType scalar_i_inv_sqrt_2;
-scalarType scalar_plus_root_i;
-scalarType scalar_minus_root_i;
 #endif 
 
 
@@ -173,168 +205,114 @@ scalarType scalar_minus_root_i;
  *       matrices of SCALAR type             * 
  *********************************************/
 // All SCALAR types have 0 and 1 and can handle -1.
-int64_t matID_scalar0;
-int64_t matID_scalar1;
-int64_t matID_scalarM1; //'minus 1'
-#if defined(USE_REAL) || defined(USE_COMPLEX) || defined(USE_MPREAL) || defined(USE_MPCOMPLEX) || defined(USE_MPRATIONAL) || defined(USE_MPRATCOMPLEX)
-int64_t matID_scalar0_5;
-int64_t matID_scalarM0_5;
-int64_t matID_inv_sqrt_2;
-int64_t matID_neg_inv_sqrt_2;
+int64_t packedID_scalar0;
+int64_t packedID_scalar1;
+int64_t packedID_scalarM1; //'minus 1'
+#ifndef IS_INTEGER
+int64_t packedID_scalar0_5;
+int64_t packedID_scalarM0_5;
 #endif
-#if defined(USE_COMPLEX) || defined(USE_MPCOMPLEX) || defined(USE_MPRATCOMPLEX)
-int64_t matID_scalar0i1;
-int64_t matID_scalar0iM1;
-int64_t matID_scalar0i0_5;
-int64_t matID_scalar0iM0_5;
-int64_t matID_i_inv_sqrt_2;
-int64_t matID_plus_root_i;
-int64_t matID_minus_root_i;
+#ifdef IS_COMPLEX
+int64_t packedID_scalar0i1;
+int64_t packedID_scalar0iM1;
+int64_t packedID_scalar0i0_5;
+int64_t packedID_scalar0iM0_5;
 #endif 
 
 /*****************************************************
  *   square matrices of MATRIX type level > 0        *
  *****************************************************/
-int64_t matID_I1;  // 1-bit identity matrix
-int64_t matID_NOT; // 1-bit NOT / bitflip matrix
+int64_t packedID_I1;  // 1-bit identity matrix
+int64_t packedID_NOT; // 1-bit NOT / bitflip matrix
   // sqrt(2) * Hadamard matrix 
   // aka iHadamard or integer Hadamard
-int64_t matID_HH1;
-#if defined(USE_REAL) || defined(USE_COMPLEX) || defined(USE_MPREAL) || defined(USE_MPCOMPLEX) || defined(USE_MPRATIONAL) || defined(USE_MPRATCOMPLEX)
-int64_t matID_H1; //Hadamard matrix  
-#endif
+int64_t packedID_HH1;
 
 void init_globals(void) {
 
   int verbose = 0;
+
 /*********************************************
  *       matrices of SCALAR type             * 
  ********************************************/
-  mat_ptr_t matptr_scalar0;
-  mat_ptr_t matptr_scalar1;
-  mat_ptr_t matptr_scalarM1;
-#if defined(USE_REAL) || defined(USE_COMPLEX) || defined(USE_MPREAL) || defined(USE_MPCOMPLEX) || defined(USE_MPRATIONAL) || defined(USE_MPRATCOMPLEX)
-  mat_ptr_t matptr_scalar0_5;
-  mat_ptr_t matptr_scalarM0_5;
-  mat_ptr_t matptr_inv_sqrt_2;
-  mat_ptr_t matptr_neg_inv_sqrt_2;
+  mats_ptr_t scaptr_scalar0;
+  mats_ptr_t scaptr_scalar1;
+  mats_ptr_t scaptr_scalarM1;
+#ifndef IS_INTEGER
+  mats_ptr_t scaptr_scalar0_5;
+  mats_ptr_t scaptr_scalarM0_5;
 #endif
-#if defined(USE_COMPLEX) || defined(USE_MPCOMPLEX) || defined(USE_MPRATCOMPLEX)
-  mat_ptr_t matptr_scalar0i1;
-  mat_ptr_t matptr_scalar0iM1;
-  mat_ptr_t matptr_scalar0i0_5;
-  mat_ptr_t matptr_scalar0iM0_5;
-  mat_ptr_t matptr_i_inv_sqrt_2;
-  mat_ptr_t matptr_plus_root_i;
-  mat_ptr_t matptr_minus_root_i;
+#ifdef IS_COMPLEX
+  mats_ptr_t scaptr_scalar0i1;
+  mats_ptr_t scaptr_scalar0iM1;
+  mats_ptr_t scaptr_scalar0i0_5;
+  mats_ptr_t scaptr_scalar0iM0_5;
 #endif 
-
-/***********************************
- *       2x2 matrices              * 
- ***********************************/
-  //mat_ptr_t matptr_I1; 
-  mat_ptr_t matptr_NOT;
-  mat_ptr_t matptr_HH1;
-#if defined(USE_REAL) || defined(USE_COMPLEX) || defined(USE_MPREAL) || defined(USE_MPCOMPLEX) || defined(USE_MPRATIONAL) || defined(USE_MPRATCOMPLEX)
-  mat_ptr_t matptr_H1;
-#endif
 
 /*****************************************************************
  *   matrices of SCALAR type                                     *
  ****************************************************************/
   sca_init(&scalar0);
-  sca_set_str(&scalar0, "0");
-  matptr_scalar0 = get_valMatPTR_from_val(scalar0);
-  matID_scalar0 = matptr_scalar0->matrixID;
+  sca_set_2ldoubles(&scalar0, 0.0L, 0.0L);
+  scaptr_scalar0 = get_scalarPTR_for_scalarVal(scalar0);
+  packedID_scalar0 = scaptr_scalar0->packedID;
   // we have already locked this value while preloading the matrix store
 
   sca_init(&scalar1);
-  sca_set_str(&scalar1, "1");
-  matptr_scalar1 = get_valMatPTR_from_val(scalar1);
-  matID_scalar1 = matptr_scalar1->matrixID;
+  sca_set_2ldoubles(&scalar1, 1.0L, 0.0L);
+  scaptr_scalar1 = get_scalarPTR_for_scalarVal(scalar1);
+  packedID_scalar1 = scaptr_scalar1->packedID;
   // we have already locked this value while preloading the matrix store
 
   sca_init(&scalarM1);
-  sca_set_str(&scalarM1, "-1");
-  matptr_scalarM1 = get_valMatPTR_from_val(scalarM1);
-  matID_scalarM1 = matptr_scalarM1->matrixID;
+  sca_set_2ldoubles(&scalarM1, -1.0L, 0.0L);
+  scaptr_scalarM1 = get_scalarPTR_for_scalarVal(scalarM1);
+  packedID_scalarM1 = scaptr_scalarM1->packedID;
   // we have already locked this value while preloading iHadamards
 
-#if defined(USE_REAL) || defined(USE_COMPLEX) || defined(USE_MPREAL) || defined(USE_MPCOMPLEX) || defined(USE_MPRATIONAL) || defined(USE_MPRATCOMPLEX)
+#ifndef IS_INTEGER
   sca_init(&scalar0_5);
   sca_set_2ldoubles(&scalar0_5, 0.5L, 0.0L);
-  matptr_scalar0_5 = get_valMatPTR_from_val(scalar0_5);
-  lock_matrix(matptr_scalar0_5);
-  matID_scalar0_5 = matptr_scalar0_5->matrixID;
+  scaptr_scalar0_5 = get_scalarPTR_for_scalarVal(scalar0_5);
+  packedID_scalar0_5 = scaptr_scalar0_5->packedID;
+  lock_matrix(packedID_scalar0_5);
 
   sca_init(&scalarM0_5);
   sca_set_2ldoubles(&scalarM0_5, -0.5L, 0.0L);
-  matptr_scalarM0_5 = get_valMatPTR_from_val(scalarM0_5);
-  lock_matrix(matptr_scalarM0_5);
-  matID_scalarM0_5 = matptr_scalarM0_5->matrixID;
+  scaptr_scalarM0_5 = get_scalarPTR_for_scalarVal(scalarM0_5);
+  packedID_scalarM0_5 = scaptr_scalarM0_5->packedID;
+  lock_matrix(packedID_scalarM0_5);
 
-  sca_init(&scalar_inv_sqrt_2);
-#if defined(USE_MPRATIONAL) || defined(USE_MPRATCOMPLEX)
-  sca_set_2ldoubles(&scalar_inv_sqrt_2, M_SQRT1_2L, 0.0L);
-#else
-  sca_set_str(&scalar_inv_sqrt_2, M_SQRT1_2S);
-#endif
-  matptr_inv_sqrt_2 = get_valMatPTR_from_val(scalar_inv_sqrt_2);
-  lock_matrix(matptr_inv_sqrt_2);
-  matID_inv_sqrt_2 = matptr_inv_sqrt_2->matrixID;
-
-  sca_init(&scalar_neg_inv_sqrt_2);
-  sca_mult(&scalar_neg_inv_sqrt_2, scalar_inv_sqrt_2, scalarM1);
-  matptr_neg_inv_sqrt_2 = get_valMatPTR_from_val(scalar_neg_inv_sqrt_2);
-  lock_matrix(matptr_neg_inv_sqrt_2);
-  matID_neg_inv_sqrt_2 = matptr_neg_inv_sqrt_2->matrixID;
 #endif
 
-#if defined(USE_COMPLEX) || defined(USE_MPCOMPLEX) || defined(USE_MPRATCOMPLEX)
+#ifdef IS_COMPLEX
 /*****************************************************************
  *   matrices of SCALAR type only used when scalars are complex  *
  ****************************************************************/
   sca_init(&scalar0i1);
   sca_set_2ldoubles(&scalar0i1, 0.0L, 1.0L);
-  matptr_scalar0i1 = get_valMatPTR_from_val(scalar0i1);
-  lock_matrix(matptr_scalar0i1);
-  matID_scalar0i1 = matptr_scalar0i1->matrixID;
+  scaptr_scalar0i1 = get_scalarPTR_for_scalarVal(scalar0i1);
+  packedID_scalar0i1 = scaptr_scalar0i1->packedID;
+  lock_matrix(packedID_scalar0i1);
 
   sca_init(&scalar0iM1);
   sca_set_2ldoubles(&scalar0iM1, 0.0L, -1.0L);
-  matptr_scalar0iM1 = get_valMatPTR_from_val(scalar0iM1);
-  lock_matrix(matptr_scalar0iM1);
-  matID_scalar0iM1 = matptr_scalar0iM1->matrixID;
+  scaptr_scalar0iM1 = get_scalarPTR_for_scalarVal(scalar0iM1);
+  packedID_scalar0iM1 = scaptr_scalar0iM1->packedID;
+  lock_matrix(packedID_scalar0iM1);
 
   sca_init(&scalar0i0_5);
   sca_set_2ldoubles(&scalar0i0_5, 0.0L, 0.5L);
-  matptr_scalar0i0_5 = get_valMatPTR_from_val(scalar0i0_5);
-  lock_matrix(matptr_scalar0i0_5);
-  matID_scalar0i0_5 = matptr_scalar0i0_5->matrixID;
+  scaptr_scalar0i0_5 = get_scalarPTR_for_scalarVal(scalar0i0_5);
+  packedID_scalar0i0_5 = scaptr_scalar0i0_5->packedID;
+  lock_matrix(packedID_scalar0i0_5);
 
   sca_init(&scalar0iM0_5);
   sca_set_2ldoubles(&scalar0iM0_5, 0.0L, -0.5L);
-  matptr_scalar0iM0_5 = get_valMatPTR_from_val(scalar0iM0_5);
-  lock_matrix(matptr_scalar0iM0_5);
-  matID_scalar0iM0_5 = matptr_scalar0iM0_5->matrixID;
+  scaptr_scalar0iM0_5 = get_scalarPTR_for_scalarVal(scalar0iM0_5);
+  packedID_scalar0iM0_5 = scaptr_scalar0iM0_5->packedID;
+  lock_matrix(packedID_scalar0iM0_5);
 
-  sca_init(&scalar_i_inv_sqrt_2);
-  sca_mult(&scalar_i_inv_sqrt_2, scalar_inv_sqrt_2, scalar0i1);
-  matptr_i_inv_sqrt_2 = get_valMatPTR_from_val(scalar_i_inv_sqrt_2);
-  lock_matrix(matptr_i_inv_sqrt_2);
-  matID_i_inv_sqrt_2 = matptr_i_inv_sqrt_2->matrixID;
-
-  sca_init(&scalar_plus_root_i);
-  sca_add(&scalar_plus_root_i, scalar_inv_sqrt_2, scalar_i_inv_sqrt_2);
-  matptr_plus_root_i = get_valMatPTR_from_val(scalar_plus_root_i);
-  lock_matrix(matptr_plus_root_i);
-  matID_plus_root_i = matptr_plus_root_i->matrixID;
-
-  sca_init(&scalar_minus_root_i);
-  sca_mult(&scalar_minus_root_i, scalar_plus_root_i, scalar0iM1);
-  matptr_minus_root_i = get_valMatPTR_from_val(scalar_minus_root_i);
-  lock_matrix(matptr_minus_root_i);
-  matID_minus_root_i = matptr_minus_root_i->matrixID;
 #endif 
   
   /****************************************************************************
@@ -355,32 +333,83 @@ void init_globals(void) {
   
   // 1-bit identity matrix
   //matptr_I1 = get_identity_matrix_ptr(1);
-  matID_I1 = get_identity_matrixID(1);
+  packedID_I1 = get_identity_pID(1);
 
   // 1-bit NOT / bitflip matrix
-  mat_ptr_t submat[4];
-  submat[0] = submat[3] = matptr_scalar0;
-  submat[1] = submat[2] = matptr_scalar1;
-  matptr_NOT = get_matPTR_from_array_of_four_subMatPTRs(submat, 1, 1);
-  lock_matrix(matptr_NOT);
-  matID_NOT = matptr_NOT->matrixID;
+  int64_t sub_pID[4];
+  sub_pID[0] = sub_pID[3] = packedID_scalar0;
+  sub_pID[1] = sub_pID[2] = packedID_scalar1;
+  packedID_NOT = get_pID_from_array_of_four_sub_pIDs(sub_pID, 1, 1);
+  lock_matrix(packedID_NOT);
 
   // sqrt(2) * Hadamard matrix 
   // aka iHadamard or integer Hadamard
-  matptr_HH1 = get_iHadamard_matrix_ptr(1);
-  matID_HH1 = matptr_HH1->matrixID;
-#if defined(USE_REAL) || defined(USE_COMPLEX) || defined(USE_MPREAL) || defined(USE_MPCOMPLEX) || defined(USE_MPRATIONAL) || defined(USE_MPRATCOMPLEX)
-  // Hadamard matrix  
-  submat[0] = submat[1] = submat[2] = matptr_inv_sqrt_2;
-  submat[3] = matptr_neg_inv_sqrt_2; 
-  matptr_H1 = get_matPTR_from_array_of_four_subMatPTRs(submat, 1, 1);
-  lock_matrix(matptr_H1);
-  matID_H1 = matptr_H1->matrixID;
+  packedID_HH1 = get_iHadamard_pID(1);
+
+
+//  fprintf(stderr,"matrixID of last loaded by init_globals()");
+//  fprintf(stderr," (2x2 Hadamard) is %" PRId64 "\n",matID_H1);
+//  fprintf(stderr,"At this point, num_matrices_in_store returns %" PRId64 "\n",
+//		num_matrices_in_store());
+
+  if (verbose) {
+   printf("finishing routine %s\n",__func__);
+  }
+
+}
+
+void clear_globals(void)
+{
+    // Free memory allocated to global scalarType variables. (Unless
+    // scalarType is multiprecision, sca_clear() is a no-op.) This
+    // routine should only be called as part of a LARC shutdown procedure.
+
+    sca_clear(&scalar0);
+    sca_clear(&scalar1);
+    sca_clear(&scalarM1);
+
+#ifndef IS_INTEGER
+    sca_clear(&scalar0_5);
+    sca_clear(&scalarM0_5);
 #endif
 
- if (verbose) {
-  printf("finishing routine %s\n",__func__);
- }
+#ifdef IS_COMPLEX
+    sca_clear(&scalar0i1);
+    sca_clear(&scalar0iM1);
+    sca_clear(&scalar0i0_5);
+    sca_clear(&scalar0iM0_5);
+#endif
 
+}
+
+void scratchVars_clear(void)
+{
+    // Clear the memory allocated to the global scalarType variables.
+    // This routine should only be called as part of a LARC shutdown
+    // procedure.
+
+    fprintf(stderr,"freeing memory for scratchVars structure\n");
+    sca_clear(&scratchVars.submit_to_store);
+    sca_clear(&scratchVars.calc_conj);
+    sca_clear(&scratchVars.quick_use);
+    sca_clear(&scratchVars.misc);
+    sca_clear(&scratchVars.approx_value);
+
+    mpz_clear(scratchVars.counter);
+    mpz_clear(scratchVars.mpinteger);
+    mpq_clear(scratchVars.mprational);
+    mpq_clear(scratchVars.mprational2);
+    mpfr_clear(scratchVars.mpreal);
+#ifdef USE_CLIFFORD
+    larc_sca_clear_clifford(&(scratchVars.clifford));
+    for (int i=0; i<CLIFFORD_DIMENSION-1; ++i)
+    {
+        mpfr_clear(mpfr_algebraic_approx[i]);
+        mpq_clear(mpq_algebraic_approx[i]);
+    }
+#endif // USE_CLIFFORD
+#ifdef MAR
+    scratchVars_mar_clear();
+#endif // MAR
 }
 

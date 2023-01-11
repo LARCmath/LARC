@@ -12,6 +12,7 @@
  *   - Steve Cuccaro (IDA-CCS)                                    *
  *   - John Daly (LPS)                                            *
  *   - John Gilbert (UCSB, IDA adjunct)                           *
+ *   - Mark Pleszkoch (IDA-CCS)                                   *
  *   - Jenny Zito (IDA-CCS)                                       *
  *                                                                *
  * Additional contributors are listed in "LARCcontributors".      *
@@ -52,23 +53,23 @@
  *****************************************************************/
 #include <stdlib.h>
 
-#include <global.h>
-#include <larc.h>
-#include <hash.h>
-#include <io.h>
-#include <json.h>
-#include <matmath.h>
-#include <matrix_store.h>
-#include <op_store.h>
-#include <organize.h>
+#include "global.h"
+#include "larc.h"
+#include "hash.h"
+#include "io.h"
+#include "json.h"
+#include "matmath.h"
+#include "matrix_store.h"
+#include "op_store.h"
+#include "organize.h"
 
 void initialize ( ) 
 {
   // Default hash exponent size
   size_t hash_exponent_matrix = DEFAULT_MATRIX_STORE_EXPONENT;
   size_t hash_exponent_op     = DEFAULT_OP_STORE_EXPONENT;
-  int    zerobitthresh        = ZEROBITTHRESH_DEFAULT;
-  int    sighash              = SIGHASH_DEFAULT;
+  int    sighash              = DEFAULT_REGIONBITPARAM;
+  int    zerobitthresh        = -1;
   mat_level_t max_level       = DEFAULT_MAX_LEVEL;
   int	 verbose	      = 1;
 
@@ -86,19 +87,19 @@ int  main ( int argc , char *argv[] )
   initialize ( );
 
   // Create a matrix
-  ScalarType one = 1.0;
-  ScalarType two = 2.0;
+  char* one = "1.0";
+  char* two = "2.0";
 
   int64_t mID_scalarOne = get_valID_from_valString ( one );
   int64_t mID_scalarTwo = get_valID_from_valString ( two );
 
-  set_hold_matrix_from_matrixID ( mID_scalarOne );
-  set_hold_matrix_from_matrixID ( mID_scalarTwo );
+  set_hold_matrix ( mID_scalarOne );
+  set_hold_matrix ( mID_scalarTwo );
 
-  int64_t mID_testMatrix = get_matID_from_four_subMatIDs ( mID_scalarOne , mID_scalarTwo , mID_scalarTwo , mID_scalarOne , 1 , 1 );
-  set_hold_matrix_from_matrixID ( mID_testMatrix );
+  int64_t mID_testMatrix = get_pID_from_four_sub_pIDs ( mID_scalarOne , mID_scalarTwo , mID_scalarTwo , mID_scalarOne , 1 , 1 );
+  set_hold_matrix ( mID_testMatrix );
   
-  print_naive_by_matID ( mID_testMatrix );
+  print_naive ( mID_testMatrix );
 
   return 0;
 }

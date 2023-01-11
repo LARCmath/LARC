@@ -1,0 +1,61 @@
+BUG FIXES:
+
+  * scalars.c, store_retval_and_explist_bounding():
+     - Fix bug by explicitly setting zero flag.
+  * organize.c, get_string_scalar_type():
+     - Add LOWER and UPPER to list of known scalar types.
+  * scalars.c, larc_sca_set_str_bounding():
+     - Recognize "NaN" on input.
+  * info_store.c, info_find():
+     - Always search for existing Info Store record before creating new one.
+  * info_store.c, info_set():
+     - Correct test for detecting whether info_data is being changed.
+     - Update Info Store record when info_data is changed.
+  * tests/python/*.py functions changed to call updated functions
+  * LARC now properly tracks the number of matrices in store after cleaning
+  * bug in get_norm_and_maxElement() fixed
+  * changed routines that were overwriting scratchVar global variables already
+    in use by modifying the variables to ones not currently used.
+  * locked matrices no longer update appears_as_subcount field (used for
+    cleaning), avoiding overflow of all-zero matrix counts in large problems
+  * holds now convert to locks if count of number of times matrix held exceeds
+    space allocated
+
+IMPROVEMENTS:
+  * added check flags to ensure that global (scratchVar) variables are not
+    modified by subroutines when the value is still needed by routines further
+    up the call chain
+  * io.c, update_infoStore_automatic_entries():
+     - Add new code to write out scalar type and other info to larcMatrix JSON file.
+  * organize.c, get_string_scalar_type():
+     - Refactor code to determine scalar type string.
+  * io.c, read_larcMatrix_file_return_matPTR():
+     - Print out warning if scalar type of JSON file different than current scalar type.
+  * organize.c, get_string_larc_version():
+     - Include information line on whether the HASHSTATS flag is enabled or not.
+  * larc.h, INFO:
+     - Rename "NUMROUNDS" to "NUMITERATIONS".
+  * replaced most user-callable routines with versions using packedID instead
+    of matrix pointers.
+  * most of the remaining routines with matrix pointer arguments made static
+    (and not callable by user)
+  * update to LARCmatrix write routines to make them more efficient and to 
+    consolidate multiple versions into one
+  * many LARC functions given new, more descriptive names
+  * matrix cleaning implemented for MAR mode
+  * reorganized functions specifically for SPR mode into their own spr.c file,
+    to parallel mar.c file
+  * validity check failures now indicate which routine failed
+  * added Doxygen documentation to more routines
+  * matrix writer now calculates LARCsize for all written matrices, adds value
+    to InfoStore for the matrix
+  * Makefile now links ncurses library instead of curses library
+
+ADDITIONS:
+  * created separate hashtable for scalar and nonscalar matrices for reduced 
+    memory requirements, simplification of various functions; updated LARC
+    routines depending on whether only a scalar matrix, only a nonscalar
+    matrix, or either type may be passed in the argument list.
+  * created packedID (contains flag determining whether matrix stored is scalar
+    or nonscalar) and modified almost all routines to use this instead of
+    either matrixID or matrix pointer.

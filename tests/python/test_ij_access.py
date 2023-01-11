@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
- ##################################################################
+ #*################################################################
  #                                                                #
  # Copyright (C) 2014, Institute for Defense Analyses             #
  # 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           #
@@ -13,6 +13,7 @@
  #   - Steve Cuccaro (IDA-CCS)                                    #
  #   - John Daly (LPS)                                            #
  #   - John Gilbert (UCSB, IDA adjunct)                           #
+ #   - Mark Pleszkoch (IDA-CCS)                                   #
  #   - Jenny Zito (IDA-CCS)                                       #
  #                                                                #
  # Additional contributors are listed in "LARCcontributors".      #
@@ -50,7 +51,7 @@
  # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, #
  # EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.             #
  #                                                                #
- ##################################################################
+ #*################################################################
 
 
 from __future__ import print_function
@@ -66,36 +67,36 @@ from ctypes import *
 if __name__ == '__main__':
 
 
-    #################################
-    ##   SET THESE PARAMETERS      ##
-    #################################
-    max_level = 12          ##  problem_size is always power of two!
+    #*###############################
+    #*   SET THESE PARAMETERS      #*
+    #*###############################
+    max_level = 12          #*  problem_size is always power of two!
 
 
-    #######################################
-    ##    Print baseline usage report    ##
-    #######################################
-    pylarc.rusage_report(0, "stdout")
+    #*#####################################
+    #*    Print baseline usage report    #*
+    #*#####################################
+    pylarc.memory_and_time_report(0, "stdout")
 
 
     matrix_exponent = 22
     op_exponent = 19   
 
-    trunc_to_zero_bits = 54
-    rnd_sig_bits = 1000
+    zeroregionbitparam = 54
+    regionbitparam = 1000
 
     verbose = 1
-    pylarc.initialize_larc(matrix_exponent,op_exponent,max_level,rnd_sig_bits,trunc_to_zero_bits,verbose)
+    pylarc.initialize_larc(matrix_exponent,op_exponent,max_level,regionbitparam,zeroregionbitparam,verbose)
     pylarc.create_report_thread(180)
 
     print("Finished creating LARC matrix and op stores and loading basic matrices.\n")
-    print("Seppuku check to see if program is to large to occur once every 10 minutes.\n")
+    print("stopHogging check to see if program is too large, to occur once every 10 minutes.\n")
 
 
-    H_12 = pylarc.get_iHadamard_matrixID(12);
-    pylarc.write_naive_by_matID(H_12,"out")
+    H_12 = pylarc.get_iHadamard_pID(12);
+    pylarc.fprint_naive(H_12,"out")
     
     # for i in range(4096):
     #     for j in range(4096):
-    #         p = pylarc.get_valString_from_matID_and_coords(H_12,i,j)
+    #         p = pylarc.get_readableString_scalar_from_pID_and_coords(H_12,i,j)
         

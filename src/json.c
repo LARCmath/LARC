@@ -12,6 +12,7 @@
  *   - Steve Cuccaro (IDA-CCS)                                    *
  *   - John Daly (LPS)                                            *
  *   - John Gilbert (UCSB, IDA adjunct)                           *
+ *   - Mark Pleszkoch (IDA-CCS)                                   *
  *   - Jenny Zito (IDA-CCS)                                       *
  *                                                                *
  * Additional contributors are listed in "LARCcontributors".      *
@@ -60,6 +61,13 @@
 #include <limits.h>
 #include <strings.h>
 
+/*!
+ * \file json.c
+ * \brief Routines used in reading and writing data stored in LARCMatrix
+ * json format.
+ *
+ */
+
 #define PRETTY_WRAPPING
 
 #ifdef PRETTY_WRAPPING
@@ -95,7 +103,7 @@ static inline size_t _j_snprint_path(char *str, size_t size, json_t *j) {
             r = snprintf(str2, size2, "->%s", j->name); // parent is object
         } else if (j->parent->type == J_ARRAY) {
             int64_t index = j - j->parent->list;
-            r = snprintf(str2, size2, "[%ld]", index); // parent is array
+            r = snprintf(str2, size2, "[%" PRId64 "]", index); // parent is array
         } else {
             j_error("unexpected parent type");
         }
@@ -230,6 +238,7 @@ static void string_append(json_t *j, char c) {
     if (!j->string_end) { // initial allocation
         size_t alloc = 64;
         j->string = malloc(alloc);
+        if (j->string == NULL) { ALLOCFAIL(); }
         j->string_end = j->string + 0;
         j->string_alloc_end = j->string + alloc;
     } else if (j->string_end+1 >= j->string_alloc_end) { // extend allocation
@@ -237,6 +246,7 @@ static void string_append(json_t *j, char c) {
         size_t alloc = j->string_alloc_end - j->string;
         alloc *= 2;
         j->string = realloc(j->string, alloc);
+        if (j->string == NULL) { ALLOCFAIL(); }
         j->string_end = j->string + size;
         j->string_alloc_end = j->string + alloc;
     }
@@ -248,6 +258,7 @@ static void string_append(json_t *j, char c) {
 
 static json_t *j_new_root() {
     json_t *j = malloc(sizeof(json_t));
+    if (j == NULL) { ALLOCFAIL(); }
     memset(j, 0, sizeof(json_t));
     j->type = J_NULL;
     return j;
@@ -259,6 +270,7 @@ static json_t *new_json(json_t *parent) {
     if (!parent->list_end) { // initial allocation
         size_t alloc = 16;
         parent->list = malloc(alloc * sizeof(json_t));
+        if (parent->list == NULL) { ALLOCFAIL(); }
         parent->list_end = parent->list + 0;
         parent->list_alloc_end = parent->list + alloc;
     } else if (parent->list_end >= parent->list_alloc_end) { // extend allocation
@@ -266,6 +278,7 @@ static json_t *new_json(json_t *parent) {
         size_t alloc = parent->list_alloc_end - parent->list;
         alloc *= 2;
         parent->list = realloc(parent->list, alloc * sizeof(json_t));
+        if (parent->list == NULL) { ALLOCFAIL(); }
         parent->list_end = parent->list + size;
         parent->list_alloc_end = parent->list + alloc;
     }
@@ -322,7 +335,7 @@ json_t *_j_parse_string(const char *c, json_t *root) {
             } else {
                 string_append(j, *c);
             }
-        } else if (isspace(*c)) {
+        } else if (isspace((int) *c)) {
             // do nothing for whitespace outside a comment or string
         } else if (*c == '/') {
             if (c[1] == '/') { c++; lex_state = COMMENT; }
@@ -439,6 +452,7 @@ json_t *_j_parse_file(FILE *fp, json_t *root) {
     // printf("  End is %ld\n",end);
     // char buf[end+1];
     char *buf = malloc(end+1);
+    if (buf == NULL) { ALLOCFAIL(); }
     size_t size = fread(buf,1,end+1,fp);
     j_check(size == end, "incomplete fread");
     //printf("j_parse_file read %ld bytes\n", size);
@@ -573,7 +587,7 @@ int _j_snprint(char *dst, int pos, size_t n, json_t *j, int indent) {
             case J_TRUE:   P0(dst,pos,n,"true"); break;
             case J_FALSE:  P0(dst,pos,n,"false"); break;
             case J_NULL:   P0(dst,pos,n,"null"); break;
-            case J_NUM64:  P1(dst,pos,n,"%ld", j->num64); break;
+            case J_NUM64:  P1(dst,pos,n,"%" PRId64 "", j->num64); break;
             case J_DOUBLE: P1(dst,pos,n,"%lg", j->num_double); break;
             case J_BIGNUM: PG(dst,pos,n,"%Zd", j->bignum); break;
             default:       P0(dst,pos,n,"<something_else>"); break;
@@ -595,9 +609,11 @@ char *j_make_rel_filename(const json_t *j, const char *filename) {
     const char *slash = (j && j->orig_filename) ? rindex(j->orig_filename, '/') : (char *)NULL;
     int len1 = slash ? (slash - j->orig_filename + 1) : 0;
     int len2 = strlen(filename);
-    char *rv = malloc(len1+len2+1);
+    int dest_size = len1+len2+1;
+    char *rv = malloc(dest_size);
+    if (rv == NULL) { ALLOCFAIL(); }
     strncpy(rv, j->orig_filename, len1);
-    strncpy(rv+len1, filename, len2);
+    strncpy(rv+len1, filename, dest_size - len1 - 1);
     rv[len1+len2] = 0;
     return rv;
 }

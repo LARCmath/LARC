@@ -27,3 +27,4 @@ build
 install
 html
 latex
+local/Makefile.conf

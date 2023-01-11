@@ -12,6 +12,7 @@
  *   - Steve Cuccaro (IDA-CCS)                                    *
  *   - John Daly (LPS)                                            *
  *   - John Gilbert (UCSB, IDA adjunct)                           *
+ *   - Mark Pleszkoch (IDA-CCS)                                   *
  *   - Jenny Zito (IDA-CCS)                                       *
  *                                                                *
  * Additional contributors are listed in "LARCcontributors".      *
@@ -56,6 +57,7 @@
 #ifndef JSON_H
 #define JSON_H
 
+#include <inttypes.h>
 #include <gmp.h>
 #include <string.h>
 #include <stdio.h>
@@ -63,6 +65,7 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <setjmp.h>
+#include "larc.h"
 
 /*!
  * \cond
@@ -181,13 +184,20 @@ void j_throw(json_t *j, const char *format, ...) __attribute__ ((format (printf,
       fprintf(stderr,__VA_ARGS__);                                                 \
       fprintf(stderr,"\n");                                                        \
       abort(); }
+        /*!< handles errors in JSON processing */
 
 #define j_check(error_if_false, ...) if (!(error_if_false)) { \
       fprintf(stderr,"j_check(%s) failed at %s:%d in %s()", #error_if_false, __FILE__, __LINE__, __func__); \
       fprintf(stderr,__VA_ARGS__);                                                                          \
       fprintf(stderr,"\n");                                                                                 \
       abort(); }
+        /*!< tests for correctness in JSON processing */
 
+/*!
+ * \brief A macro to aid printing used in JSON processing
+ * \param out The string to which the message is printed
+ * \param arg The value to be printed
+ */
 #define SPRINTF(out, arg) { \
         va_list a1, a2; \
         va_start(a1, arg); \
@@ -425,7 +435,8 @@ static inline json_t *j_key_index(json_t *j, int64_t index) {
         return NULL;
     }
     if (index >= j->list_end - j->list) {
-        j_throw(j, "element %ld out of bounds [0,%ld)",index,j->num64);
+        j_throw(j, "element %" PRId64 " out of bounds [0,%" PRId64 ")",
+		index,j->num64);
         return NULL;
     }
     return &j->list[index];
@@ -474,7 +485,8 @@ static inline json_t *j_array_index(json_t *j, int64_t index) {
         return NULL;
     }
     if (index >= j->list_end - j->list) {
-        j_throw(j, "element %ld out of array bounds [0,%ld)",index,j->num64);
+        j_throw(j, "element %" PRId64 " out of bounds [0,%" PRId64 ")",
+		index,j->num64);
         return NULL;
     }
     return &j->list[index];
@@ -512,6 +524,11 @@ static inline int64_t j_array_get_length(json_t *j) {
 // magic parse
 ////////////////////////////////////////////////////////////////////////////////
 
+/*!
+ * \brief "Magic Parse" routine
+ * \param f A file path
+ * \param e Something to be parsed
+ */
 #define j_magic_parse_filename(f, e) ( { \
         json_t *j=j_new(NULL); \
         j_check(j, "j_new() failed"); \

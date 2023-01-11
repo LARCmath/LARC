@@ -1,0 +1,412 @@
+\documentclass{article}
+
+\title{Build Notes for LARC and MyPyLARC}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This document contains build notes for
+the LARC software package and the
+example package MyPyLARC.
+\end{abstract}
+
+\section{Executive Summary: Ubuntu}
+On Ubuntu, the following commands can be used to install the
+software pre-requisites for LARC and MyPyLARC.
+They have been used on Ubuntu 18.04, but should very likely work
+for many versions of Ubuntu.
+\begin{verbatim}
+    # for make, gcc commands
+    sudo apt install build-essential
+
+    # for git access to the LARC repository
+    sudo apt install git
+
+    # for GNU Multiple Precision arithmetic library
+    sudo apt install libgmp-dev
+
+    # for Multiple Precision Floating Point library
+    sudo apt install libmpfr-dev
+
+    # for Multiple Precision Complex library
+    sudo apt install libmpc-dev
+
+    # for Screen Handling and Terminal Information libraries
+    sudo apt install libncurses5-dev
+
+    # for "Python.h" file used by swig
+    sudo apt install python3-dev
+
+    # for Python interface/wrapper to C code
+    sudo apt install swig
+
+    # for Doxygen source code documentation
+    sudo apt install doxygen
+
+    # packages for Python example code
+    sudo apt install python3-numpy
+    sudo apt install python3-scipy
+    sudo apt install python3-matplotlib
+
+    # for Jupyter example code
+    sudo apt install jupyter
+    sudo apt install python3-pyside
+\end{verbatim}
+
+\noindent
+Once the software pre-requisites have been installed, the
+following commands can be used to obtain the LARC
+and MyPyLARC source code from GitHub:
+\begin{verbatim}
+    git clone https://github.com/LARCmath/LARC.git
+
+    git clone https://github.com/LARCmath/MyPyLARC.git
+\end{verbatim}
+
+\noindent
+Once the software pre-requisites have been installed
+and the source code has been obtained from GitHub, the
+following commands can be used to build LARC:
+\begin{verbatim}
+    # Go into the high-level LARC directory
+    cd LARC
+
+    # Select the appropriate local Makefile configuration file
+    cp local/Makefile.conf.ubuntu1804 local/Makefile.conf
+
+    # Perform unit tests
+    make unittests
+
+    # Build the version of LARC for your desired scalar type
+    make clean
+    make TYPE=COMPLEX
+\end{verbatim}
+
+\noindent
+Once the software pre-requisites have been installed
+and the source code has been obtained from GitHub, the
+following commands can be used to build MyPyLARC:
+\begin{verbatim}
+    # Go into the high-level MyPyLARC directory
+    cd MyPyLARC
+
+    # Select the appropriate local Makefile configuration file
+    cp local/Makefile.conf.ubuntu1804 local/Makefile.conf
+
+    # Obtain the initial local copy of LARC
+    # NOTE: This command will fail, but it will still have done
+    #   what we need it to do before it fails.
+    make
+
+    # Select the appropriate local Makefile configuration file
+    #   for the local copy of LARC
+    cp larc/local/Makefile.conf.ubuntu1804 larc/local/Makefile.conf
+
+    # Build the version of MyPyLARC for your desired scalar type
+    make clean
+    make TYPE=COMPLEX
+\end{verbatim}
+
+
+\section{Executive Summary: CentOS 8}
+On CentOS 8, the following commands can be used to install the
+software pre-requisites for LARC and MyPyLARC.
+Please contact the developers if there are problems; they have
+not been tested yet.
+\begin{verbatim}
+    yum install git             
+
+    yum install gmp-devel
+    yum install mpfr-devel
+
+    # You need to download: "https://ftp.gnu.org/gnu/mpc/mpc-1.1.0.tar.gz"
+    tar zxvf mpc-1.1.0.tar.gz
+    cd mpc-1.1.0
+    ./configure
+    make
+    make check
+    make install
+
+    yum install ncurses-devel
+    yum install python3-devel
+    yum install swig
+    dnf --enablerepo=PowerTools install doxygen
+\end{verbatim}
+
+\noindent
+After this step, switch over to the Ubuntu instructions.
+Use the Makefile.conf.ubuntu1804 local configuration file as
+we do not yet have a CentOS local configuration file.
+
+
+\section{Details: Software Dependencies}
+This section describes the various software packages
+that LARC and MyPyLARC depend upon.
+Note that all the installation commands given
+below should be done as the {\tt root} user.
+
+\subsection{git}
+\subsubsection{Use}
+We use git to access the LARC repository.
+In MyPyLARC, the makefile uses git to pull the
+most recent version of LARC.
+\subsection{Version Requirements}
+All the versions of git we have tried work fine;
+there are no known restrictions.
+In particular, the following versions of git work:
+\begin{itemize}
+\item git version 1.7.1, released 2010
+\item git version 1.8.3.1, released 2013
+\item git version 2.17.1, released 2018
+\end{itemize}
+\subsubsection{General Information}
+As of June 2020, the latest version of git is 2.27.0,
+released June 1, 2020.
+\subsubsection{Installation}
+On Ubuntu, use {\tt "apt install git"}.
+On CentOS 8, use {\tt "yum install git"}.
+
+\subsection{make}
+\subsubsection{Use}
+We use make to build LARC and/or MyPyLARC.
+\subsection{Version Requirements}
+All the versions of git we have tried work fine;
+there are no known restrictions.
+In particular, the following versions of GNU Make work:
+\begin{itemize}
+\item GNU Make 3.81, released 2006
+\item GNU Make 3.82, released 2010
+\item GNU Make 4.1, released 2014
+\end{itemize}
+\subsubsection{General Information}
+As of June 2020, the latest version of GNU Make is 4.3,
+released January 19, 2020.
+\subsubsection{Installation}
+On Ubuntu, use {\tt "apt install build-essential"}.
+
+\subsection{gcc}
+This is the GNU Compiler Collection.
+\subsubsection{Use}
+We use gcc to compile the LARC and MyPyLARC C code,
+including the C code generated by SWIG.
+\subsection{Version Requirements}
+In the gcc 6 series, the following versions of gcc work:
+\begin{itemize}
+\item gcc version 6.4.0, released 2017
+\end{itemize}
+In the gcc 7 series, the following versions of gcc work:
+\begin{itemize}
+\item gcc version 7.5.0, released 2019
+\end{itemize}
+In the gcc 8 series, the following versions of gcc work:
+\begin{itemize}
+\item gcc version 8.3.0, released 2019
+\end{itemize}
+In the gcc 9 series, the following versions of gcc work:
+\begin{itemize}
+\item gcc version 9.3.0, released 2020
+\end{itemize}
+Version 10.1 of GCC does not work.  The code compiles,
+but it does not build.
+\subsubsection{General Information}
+As of June 2020, the latest version of GCC is 10.1,
+released on May 9, 2020.
+\subsubsection{Installation}
+On Ubuntu, use {\tt "apt install build-essential"}.
+\subsubsection{Makefile Considerations}
+The compiler must be on the executable path and accessable
+via the command \texttt{"gcc"}.
+
+\subsection{gmp}
+This is the GNU Multiple Precision Arithmetic Library.
+\subsubsection{Use}
+This library is used to implement LARC's multi-precision
+scalar types.
+Note that even if LARC is compiled with a fixed-precision
+scalar type (i.e., INTEGER, REAL, COMPLEX), this library
+is still needed internally to compute pre-defined scalar
+values.
+\subsection{Version Requirements}
+We need version 5.0 or later of GNU GMP because it
+is required by MPFR version 4.0.0.
+In particular, the following versions of GNU GMP work:
+\begin{itemize}
+\item gmp version 6.1.2, released 2016
+\item gmp version 6.2.0, released 2020
+\end{itemize}
+\subsubsection{General Information}
+As of June 2020, the latest version of GMP is 6.2.0,
+released January 17, 2020.
+\subsubsection{Installation}
+On Ubuntu, use {\tt "apt install libgmp-dev"}.
+On CentOS 8, use {\tt "yum install gmp-devel"}.
+\subsubsection{Makefile Considerations}
+The location of the include file \texttt{"gmp.h"}
+is specified by the variable \texttt{GMPIDIR} in the
+local Makefile configuration file \texttt{"local/Makefile.conf"}.
+The location of the library file \texttt{"libgmp.so"}
+is specified by the variable \texttt{GMPLDIR} in the
+local Makefile configuration file \texttt{"local/Makefile.conf"}.
+
+\subsection{mpfr}
+This is the GNU Multiple Precision Floating-Point Reliable Library.
+\subsubsection{Use}
+This library is used to implement LARC's multi-precision
+scalar types.
+Note that even if LARC is compiled with a fixed-precision
+scalar type (i.e., INTEGER, REAL, COMPLEX), this library
+is still needed internally to compute pre-defined scalar
+values.
+\subsection{Version Requirements}
+We need version 4.0.0 or later of GNU MPFR due to our use of
+the function {\tt "mpfr\_get\_q()"}.
+In particular, the following versions of GNU MPFR work:
+\begin{itemize}
+\item mpfr version 4.0.2
+\end{itemize}
+\subsubsection{General Information}
+As of June 2020, the latest version of MPFR is 4.0.2,
+released January 31, 2019.
+\subsubsection{Installation}
+On Ubuntu, use {\tt "apt install libmpfr-dev"}.
+On CentOS 8, use {\tt "yum install mpfr-devel"}.
+\subsubsection{Makefile Considerations}
+The location of the include file \texttt{"mpfr.h"}
+is specified by the variable \texttt{MPIDIR} in the
+local Makefile configuration file \texttt{"local/Makefile.conf"}.
+The location of the library file \texttt{"libmpfr.so"}
+is specified by the variable \texttt{MPLDIR} in the
+local Makefile configuration file \texttt{"local/Makefile.conf"}.
+
+\subsection{mpc}
+This is the GNU Multiple Precision Complex Library.
+\subsubsection{Use}
+This library is used to implement LARC's multi-precision
+scalar types.
+Note that even if LARC is compiled with a fixed-precision
+scalar type (i.e., INTEGER, REAL, COMPLEX), this library
+is still needed internally to compute pre-defined scalar
+values.
+\subsection{Version Requirements}
+We need version 1.1.0 of GNU MPC due to our use of
+the function {\tt "mpc\_rootofunity()"}.
+In particular, the following version of GNU MPC works:
+\begin{itemize}
+\item mpc version 1.1.0
+\end{itemize}
+\subsubsection{General Information}
+As of June 2020, the latest version of GNU MPC is 1.1.0,
+released January 2018.
+\subsubsection{Installation}
+On Ubuntu, use {\tt "apt install libmpc-dev"}.
+On CentOS 8, the command is {\tt "dnf --enablerepo=PowerTools install libmpc-devel"},
+except that it doesn't install a recent enough version.
+
+\medskip
+\noindent
+To build and install the latest version:
+\begin{verbatim}
+    # download "https://ftp.gnu.org/gnu/mpc/mpc-1.1.0.tar.gz"
+    tar zxvf mpc-1.1.0.tar.gz
+    cd mpc-1.1.0
+    ./configure
+    make
+    make check
+    make install
+\end{verbatim}
+\subsubsection{Makefile Considerations}
+The location of the include file \texttt{"mpc.h"}
+is specified by the variable \texttt{MPIDIR} in the
+local Makefile configuration file \texttt{"local/Makefile.conf"}.
+The location of the library file \texttt{"libmpc.so"}
+is specified by the variable \texttt{MPLDIR} in the
+local Makefile configuration file \texttt{"local/Makefile.conf"}.
+
+\subsection{curses}
+\subsubsection{Use}
+\subsection{Version Requirements}
+\subsubsection{General Information}
+\subsubsection{Installation}
+On CentOS 8, use {\tt "yum install ncurses-devel"}.
+\subsubsection{Makefile Considerations}
+...
+
+\subsection{python3}
+\subsubsection{Use}
+\subsection{Version Requirements}
+\subsubsection{General Information}
+\subsubsection{Installation}
+On CentOS 8, use {\tt "yum install python3-devel"}.
+\subsubsection{Makefile Considerations}
+The main command must be on the executable path and accessable
+via the command \texttt{"python3"}.
+The include file \texttt{"Python.h"} must be in one of
+include directories specified in the main Makefile or local Makefile
+configuration file.
+
+\subsection{swig}
+\subsubsection{Use}
+\subsection{Version Requirements}
+We need SWIG 3.0.0 or later for Python3 support.
+In particular, the following versions of SWIG work:
+\begin{itemize}
+\item SWIG version 3.0.12
+\item SWIG version 4.0.1
+\end{itemize}
+\subsubsection{General Information}
+As of June 2020, the latest version of SWIG is 4.0.2,
+released June 8, 2020.
+\subsubsection{Installation}
+On Ubuntu, use {\tt "apt install swig"}.
+On CentOS 8, use {\tt "yum install swig"}.
+\subsubsection{Makefile Considerations}
+The main command be on the executable path and accessable
+via the command \texttt{"swig"}.
+
+\subsection{doxygen}
+\subsubsection{Use}
+\subsection{Version Requirements}
+We know that doxygen version 1.8.5 basically works,
+except that it generates many ``unsupported tag''
+warnings about the {\tt "src/Doxyfile.in"} file.
+The following warning is harmless and may be ignored:
+\begin{verbatim}
+Warning: ignoring unsupported tag ..., file src/Doxygen.in
+\end{verbatim}
+for the following tags:
+\begin{verbatim}
+... `ALLOW_UNICODE_NAMES    =' at line 79, ...
+... `TOC_INCLUDE_HEADINGS   =' at line 313, ...
+... `GROUP_NESTED_COMPOUNDS =' at line 370, ...
+... `HIDE_COMPOUND_REFERENCE=' at line 541, ...
+... `SHOW_GROUPED_MEMB_INC  =' at line 554, ...
+... `WARN_AS_ERROR          =' at line 765, ...
+... `LATEX_EXTRA_STYLESHEET =' at line 1743, ...
+... `LATEX_TIMESTAMP        =' at line 1810, ...
+... `RTF_SOURCE_CODE        =' at line 1876, ...
+... `MAN_SUBDIR             =' at line 1911, ...
+... `DOCBOOK_PROGRAMLISTING =' at line 1974, ...
+... `DIA_PATH               =' at line 2168, ...
+... `DIAFILE_DIRS           =' at line 2380, ...
+... `PLANTUML_JAR_PATH      =' at line 2388, ...
+... `PLANTUML_CFG_FILE      =' at line 2393, ...
+... `PLANTUML_INCLUDE_PATH  =' at line 2398, ...
+\end{verbatim}
+
+Additionally, the following versions of doxygen work without warnings:
+\begin{itemize}
+\item doxygen version 1.8.13
+\item doxygen version 1.8.17
+\end{itemize}
+\subsubsection{General Information}
+As of June 2020, the latest version of Doxygen is 1.8.18,
+released April 13, 2018.
+\subsubsection{Installation}
+On Ubuntu, use {\tt "apt install doxygen"}.
+On CentOS 8, use {\tt "dnf --enablerepo=PowerTools install doxygen"}.
+\subsubsection{Makefile Considerations}
+The main command must be on the executable path and accessable
+via the command \texttt{"doxygen"}.
+
+\end{document}

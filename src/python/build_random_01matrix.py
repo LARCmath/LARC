@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
- ##################################################################
+ #*################################################################
  #                                                                #
  # Copyright (C) 2014, Institute for Defense Analyses             #
  # 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           #
@@ -13,6 +13,7 @@
  #   - Steve Cuccaro (IDA-CCS)                                    #
  #   - John Daly (LPS)                                            #
  #   - John Gilbert (UCSB, IDA adjunct)                           #
+ #   - Mark Pleszkoch (IDA-CCS)                                   #
  #   - Jenny Zito (IDA-CCS)                                       #
  #                                                                #
  # Additional contributors are listed in "LARCcontributors".      #
@@ -50,7 +51,7 @@
  # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, #
  # EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.             #
  #                                                                #
- ##################################################################
+ #*################################################################
 
 from __future__ import print_function
 
@@ -60,6 +61,9 @@ sys.path.append(os.path.join(os.path.dirname(__file__),"../"))
 import pylarc
 import argparse
 
+## \file build_random_01matrix.py
+#  \brief Generate a random [0,1] matrix and write to LARCmatrix file.
+#
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description="Generate a random 0,1 matrix and write to LARCMatrix file. Matrix scalar type will match current make settings.")
@@ -81,9 +85,9 @@ if __name__ == '__main__':
     larc_initer.initLarc()          
 
     # generate matrix
-    matID = pylarc.random_bool_matrixID_from_count(args.row_level, args.col_level, args.num_ones)
+    matID = pylarc.random_Boolean_matrix_from_count(args.row_level, args.col_level, args.num_ones)
 
     # write matrix to file
-    pylarc.write_larcMatrix_file_by_matID(matID, args.matrix_path)
+    pylarc.fprint_larcMatrixFile(matID, args.matrix_path)
 
 

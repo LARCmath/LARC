@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
- ##################################################################
+ #*################################################################
  #                                                                #
  # Copyright (C) 2014, Institute for Defense Analyses             #
  # 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           #
@@ -13,6 +13,7 @@
  #   - Steve Cuccaro (IDA-CCS)                                    #
  #   - John Daly (LPS)                                            #
  #   - John Gilbert (UCSB, IDA adjunct)                           #
+ #   - Mark Pleszkoch (IDA-CCS)                                   #
  #   - Jenny Zito (IDA-CCS)                                       #
  #                                                                #
  # Additional contributors are listed in "LARCcontributors".      #
@@ -50,7 +51,7 @@
  # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, #
  # EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.             #
  #                                                                #
- ##################################################################
+ #*################################################################
 
 from __future__ import print_function
 
@@ -70,11 +71,11 @@ if __name__ == '__main__':
     mat_store_exp = 26
     op_store_exp = 24
     max_level = 10
-    rnd_sig_bits = -1   # default value
-    trunc_to_zero_bits = -1  # default value
+    regionbitparam = -1   # default value
+    zeroregionbitparam = -1  # default value
     pylarc.create_report_thread(1800)
     verbose = 1
-    pylarc.initialize_larc(mat_store_exp,op_store_exp,max_level,rnd_sig_bits,trunc_to_zero_bits,verbose)
+    pylarc.initialize_larc(mat_store_exp,op_store_exp,max_level,regionbitparam,zeroregionbitparam,verbose)
 
 
     # In the Makefile you can compile with different scalarType values
@@ -117,8 +118,8 @@ if __name__ == '__main__':
     print('array A:', aarr)
 
     # creating or finding the matrix associated with the array
-    serial_a = pylarc.row_major_list_to_store_matrixID(aarr, 3, 0, 1)
-    pylarc.print_naive_by_matID(serial_a)
+    serial_a = pylarc.row_major_list_to_store(aarr, 3, 0, 1)
+    pylarc.print_naive(serial_a)
     print("\n")
 
     # turn the matrix into an array by reading off each row in turn (row major format)
@@ -128,18 +129,18 @@ if __name__ == '__main__':
     print('array B:', barr)
 
     # creating or finding the matrix associated with the array
-    serial_b = pylarc.row_major_list_to_store_matrixID(barr, 2, 0, 1)
-    pylarc.print_naive_by_matID(serial_b)
+    serial_b = pylarc.row_major_list_to_store(barr, 2, 0, 1)
+    pylarc.print_naive(serial_b)
     print("\n")
 
     print("kronecker product A \otimes B:")
-    serial_c = pylarc.kronecker_product_matrixID(serial_a,serial_b)
-    pylarc.print_naive_by_matID(serial_c)
+    serial_c = pylarc.kronecker_product(serial_a,serial_b)
+    pylarc.print_naive(serial_c)
     print("\n")
 
     print("kronecker product B \otimes A:")
-    serial_c = pylarc.kronecker_product_matrixID(serial_b,serial_a)
-    pylarc.print_naive_by_matID(serial_c)
+    serial_c = pylarc.kronecker_product(serial_b,serial_a)
+    pylarc.print_naive(serial_c)
     print("\n")
 
     print("ROW_COLUMN CASE")
@@ -150,8 +151,8 @@ if __name__ == '__main__':
     print('array A:', aarr)
 
     # creating or finding the matrix associated with the array
-    serial_a = pylarc.row_major_list_to_store_matrixID(aarr, 0, 3, 8)
-    pylarc.print_naive_by_matID(serial_a)
+    serial_a = pylarc.row_major_list_to_store(aarr, 0, 3, 8)
+    pylarc.print_naive(serial_a)
     print("\n")
 
     # turn the matrix into an array by reading off each row in turn (row major format)
@@ -161,13 +162,13 @@ if __name__ == '__main__':
     print('array B:', barr)
 
     # creating or finding the matrix associated with the array
-    serial_b = pylarc.row_major_list_to_store_matrixID(barr, 2, 0, 1)
-    pylarc.print_naive_by_matID(serial_b)
+    serial_b = pylarc.row_major_list_to_store(barr, 2, 0, 1)
+    pylarc.print_naive(serial_b)
     print("\n")
 
     print("kronecker product A \otimes B:")
-    serial_c = pylarc.kronecker_product_matrixID(serial_a,serial_b)
-    pylarc.print_naive_by_matID(serial_c)
+    serial_c = pylarc.kronecker_product(serial_a,serial_b)
+    pylarc.print_naive(serial_c)
     print("\n")
 
     print("COLUMN_ROW CASE")
@@ -178,8 +179,8 @@ if __name__ == '__main__':
     print('array A:', aarr)
 
     # creating or finding the matrix associated with the array
-    serial_a = pylarc.row_major_list_to_store_matrixID(aarr, 3, 0, 1)
-    pylarc.print_naive_by_matID(serial_a)
+    serial_a = pylarc.row_major_list_to_store(aarr, 3, 0, 1)
+    pylarc.print_naive(serial_a)
     print("\n")
 
     # turn the matrix into an array by reading off each row in turn (row major format)
@@ -189,13 +190,13 @@ if __name__ == '__main__':
     print('array B:', barr)
 
     # creating or finding the matrix associated with the array
-    serial_b = pylarc.row_major_list_to_store_matrixID(barr, 0, 2, 4)
-    pylarc.print_naive_by_matID(serial_b)
+    serial_b = pylarc.row_major_list_to_store(barr, 0, 2, 4)
+    pylarc.print_naive(serial_b)
     print("\n")
 
     print("kronecker product A \otimes B:")
-    serial_c = pylarc.kronecker_product_matrixID(serial_a,serial_b)
-    pylarc.print_naive_by_matID(serial_c)
+    serial_c = pylarc.kronecker_product(serial_a,serial_b)
+    pylarc.print_naive(serial_c)
     print("\n")
 
     print("ROW_ROW CASE")
@@ -206,8 +207,8 @@ if __name__ == '__main__':
     print('array A:', aarr)
 
     # creating or finding the matrix associated with the array
-    serial_a = pylarc.row_major_list_to_store_matrixID(aarr, 0, 3, 8)
-    pylarc.print_naive_by_matID(serial_a)
+    serial_a = pylarc.row_major_list_to_store(aarr, 0, 3, 8)
+    pylarc.print_naive(serial_a)
     print("\n")
 
     # turn the matrix into an array by reading off each row in turn (row major format)
@@ -217,18 +218,18 @@ if __name__ == '__main__':
     print('array B:', barr)
 
     # creating or finding the matrix associated with the array
-    serial_b = pylarc.row_major_list_to_store_matrixID(barr, 0, 2, 4)
-    pylarc.print_naive_by_matID(serial_b)
+    serial_b = pylarc.row_major_list_to_store(barr, 0, 2, 4)
+    pylarc.print_naive(serial_b)
     print("\n")
 
     print("kronecker product A \otimes B:")
-    serial_c = pylarc.kronecker_product_matrixID(serial_a,serial_b)
-    pylarc.print_naive_by_matID(serial_c)
+    serial_c = pylarc.kronecker_product(serial_a,serial_b)
+    pylarc.print_naive(serial_c)
     print("\n")
 
     print("kronecker product B \otimes A:")
-    serial_c = pylarc.kronecker_product_matrixID(serial_b,serial_a)
-    pylarc.print_naive_by_matID(serial_c)
+    serial_c = pylarc.kronecker_product(serial_b,serial_a)
+    pylarc.print_naive(serial_c)
     print("\n")
 
     print("MATRIX_ROW CASE")
@@ -239,8 +240,8 @@ if __name__ == '__main__':
     print('array A:', aarr)
 
     # creating or finding the matrix associated with the array
-    serial_a = pylarc.row_major_list_to_store_matrixID(aarr, 1, 2, 4)
-    pylarc.print_naive_by_matID(serial_a)
+    serial_a = pylarc.row_major_list_to_store(aarr, 1, 2, 4)
+    pylarc.print_naive(serial_a)
     print("\n")
 
     # turn the matrix into an array by reading off each row in turn (row major format)
@@ -250,13 +251,13 @@ if __name__ == '__main__':
     print('array B:', barr)
 
     # creating or finding the matrix associated with the array
-    serial_b = pylarc.row_major_list_to_store_matrixID(barr, 0, 2, 4)
-    pylarc.print_naive_by_matID(serial_b)
+    serial_b = pylarc.row_major_list_to_store(barr, 0, 2, 4)
+    pylarc.print_naive(serial_b)
     print("\n")
 
     print("kronecker product A \otimes B:")
-    serial_c = pylarc.kronecker_product_matrixID(serial_a,serial_b)
-    pylarc.print_naive_by_matID(serial_c)
+    serial_c = pylarc.kronecker_product(serial_a,serial_b)
+    pylarc.print_naive(serial_c)
     print("\n")
 
     print("MATRIX_COLUMN CASE")
@@ -267,8 +268,8 @@ if __name__ == '__main__':
     print('array A:', aarr)
 
     # creating or finding the matrix associated with the array
-    serial_a = pylarc.row_major_list_to_store_matrixID(aarr, 1, 2, 4)
-    pylarc.print_naive_by_matID(serial_a)
+    serial_a = pylarc.row_major_list_to_store(aarr, 1, 2, 4)
+    pylarc.print_naive(serial_a)
     print("\n")
 
     # turn the matrix into an array by reading off each row in turn (row major format)
@@ -278,13 +279,13 @@ if __name__ == '__main__':
     print('array B:', barr)
 
     # creating or finding the matrix associated with the array
-    serial_b = pylarc.row_major_list_to_store_matrixID(barr, 2, 0, 1)
-    pylarc.print_naive_by_matID(serial_b)
+    serial_b = pylarc.row_major_list_to_store(barr, 2, 0, 1)
+    pylarc.print_naive(serial_b)
     print("\n")
 
     print("kronecker product A \otimes B:")
-    serial_c = pylarc.kronecker_product_matrixID(serial_a,serial_b)
-    pylarc.print_naive_by_matID(serial_c)
+    serial_c = pylarc.kronecker_product(serial_a,serial_b)
+    pylarc.print_naive(serial_c)
     print("\n")
 
     print("ROW_MATRIX CASE")
@@ -295,8 +296,8 @@ if __name__ == '__main__':
     print('array A:', aarr)
 
     # creating or finding the matrix associated with the array
-    serial_a = pylarc.row_major_list_to_store_matrixID(aarr, 1, 2, 4)
-    pylarc.print_naive_by_matID(serial_a)
+    serial_a = pylarc.row_major_list_to_store(aarr, 1, 2, 4)
+    pylarc.print_naive(serial_a)
     print("\n")
 
     # turn the matrix into an array by reading off each row in turn (row major format)
@@ -306,13 +307,13 @@ if __name__ == '__main__':
     print('array B:', barr)
 
     # creating or finding the matrix associated with the array
-    serial_b = pylarc.row_major_list_to_store_matrixID(barr, 0, 2, 4)
-    pylarc.print_naive_by_matID(serial_b)
+    serial_b = pylarc.row_major_list_to_store(barr, 0, 2, 4)
+    pylarc.print_naive(serial_b)
     print("\n")
 
     print("kronecker product B \otimes A:")
-    serial_c = pylarc.kronecker_product_matrixID(serial_b,serial_a)
-    pylarc.print_naive_by_matID(serial_c)
+    serial_c = pylarc.kronecker_product(serial_b,serial_a)
+    pylarc.print_naive(serial_c)
     print("\n")
 
     print("COLUMN_MATRIX CASE")
@@ -323,8 +324,8 @@ if __name__ == '__main__':
     print('array A:', aarr)
 
     # creating or finding the matrix associated with the array
-    serial_a = pylarc.row_major_list_to_store_matrixID(aarr, 1, 2, 4)
-    pylarc.print_naive_by_matID(serial_a)
+    serial_a = pylarc.row_major_list_to_store(aarr, 1, 2, 4)
+    pylarc.print_naive(serial_a)
     print("\n")
 
     # turn the matrix into an array by reading off each row in turn (row major format)
@@ -334,11 +335,11 @@ if __name__ == '__main__':
     print('array B:', barr)
 
     # creating or finding the matrix associated with the array
-    serial_b = pylarc.row_major_list_to_store_matrixID(barr, 2, 0, 1)
-    pylarc.print_naive_by_matID(serial_b)
+    serial_b = pylarc.row_major_list_to_store(barr, 2, 0, 1)
+    pylarc.print_naive(serial_b)
     print("\n")
 
     print("kronecker product B \otimes A:")
-    serial_c = pylarc.kronecker_product_matrixID(serial_b,serial_a)
-    pylarc.print_naive_by_matID(serial_c)
+    serial_c = pylarc.kronecker_product(serial_b,serial_a)
+    pylarc.print_naive(serial_c)
     print("\n")

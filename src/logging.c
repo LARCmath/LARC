@@ -12,6 +12,7 @@
  *   - Steve Cuccaro (IDA-CCS)                                    *
  *   - John Daly (LPS)                                            *
  *   - John Gilbert (UCSB, IDA adjunct)                           *
+ *   - Mark Pleszkoch (IDA-CCS)                                   *
  *   - Jenny Zito (IDA-CCS)                                       *
  *                                                                *
  * Additional contributors are listed in "LARCcontributors".      *
@@ -71,6 +72,32 @@
 #include "op_store.h"
 #include "global.h"
 
+/*!
+ * \file logging.c
+ * \brief Routines for user logging of projects - still preliminary
+ */
+
+/*!
+ * \ingroup larc
+ * \brief Returns the current working directory.
+ *
+ * Code copied from: https://www.gnu.org/software/libc/manual/html_node/Working-Directory.html
+ */
+char * gnu_getcwd_copy ()
+{
+  size_t size = 100;
+
+  while (1)
+    {
+      char *buffer = (char *) malloc (size);
+      if (getcwd (buffer, size) == buffer)
+        return buffer;
+      free (buffer);
+      if (errno != ERANGE)
+        return 0;
+      size *= 2;
+    }
+}
 
 /* create_log_dir
    Authors: Jenny and Steve
@@ -82,6 +109,18 @@
    function is called with empty string instead of log_name being 
    passed as an argument.
  */
+
+/*!
+ * \ingroup larc
+ * \brief Creates in the current directory a directory named [log_name]/YYYYMMDD/YYYYMMDD.hhmmss
+ * 
+ * The directory is created within the directory that the main program is 
+ * called from. If one or both of the directories above it ([log_name] and
+ * [log_name]/YYYYMMDD) do not exist, they are created first.
+ *
+ * \param log_name A string with the name to be used for the top-level directory (if null, the default name is 'log')
+ * \return A string containing the path to the bottom-level log directory
+ */
 char * create_log_dir(char * log_name)
 {
 
@@ -92,14 +131,14 @@ char * create_log_dir(char * log_name)
 
         // Grab the current directory path
         // char *current_path =  malloc(1024);
-        char *get_current_dir_name(void);
-        char *current_path = get_current_dir_name();
+        char *current_path = gnu_getcwd_copy();
         // printf("LOG: The current path is %s, and has length %d\n",
         //        current_path,strlen(current_path));
 
         // make the path to the top log directory
         // char *log_path =  malloc(strlen(current_path) + strlen(log_dir) + 1);
         char *log_path =  malloc(strlen(current_path) + strlen(log_dir) + 2);
+        if (log_path == NULL) { ALLOCFAIL(); }
 	strcpy(log_path,current_path);
         strcat(log_path,"/");
         strcat(log_path,log_dir);
@@ -123,6 +162,7 @@ char * create_log_dir(char * log_name)
         // create name of day-stamp subdirectory inside main log directory
         int size_time_buffers = 256;
         char *time_buffer_day = malloc(256);
+        if (time_buffer_day == NULL) { ALLOCFAIL(); }
         char *time_format_day="%4u%02u%02u";
         snprintf(time_buffer_day,size_time_buffers,time_format_day,yyyy,mo,dd);
         // printf("LOG: The time string is %s, and has length %d\n",
@@ -131,6 +171,7 @@ char * create_log_dir(char * log_name)
 
         // make a sub directory in the log, named with the day stamp        
         char *day_log_path =  malloc(strlen(log_path) + strlen(time_buffer_day) + 2);
+        if (day_log_path == NULL) { ALLOCFAIL(); }
 	day_log_path = strcpy(day_log_path,log_path);
         strcat(day_log_path,"/");
         strcat(day_log_path,time_buffer_day);
@@ -141,6 +182,7 @@ char * create_log_dir(char * log_name)
   
         // Create a bottom level logging subdirectory with complete time stamp
         char *time_buffer_full = malloc(256);
+        if (time_buffer_full == NULL) { ALLOCFAIL(); }
         char *time_format_full="%4u%02u%02u.%02u%02u%02u";
         snprintf(time_buffer_full,size_time_buffers,time_format_full,yyyy,mo,dd,hh,mm,ss);
         // printf("LOG: The time string is %s, and has length %d\n",
@@ -148,6 +190,7 @@ char * create_log_dir(char * log_name)
 
         // make a sub sub directory in the log, named with the time stamp        
         char *time_log_path =  malloc(strlen(day_log_path) + strlen(time_buffer_full) + 2);
+        if (time_log_path == NULL) { ALLOCFAIL(); }
 	time_log_path = strcpy(time_log_path,day_log_path);
         strcat(time_log_path,"/");
         strcat(time_log_path,time_buffer_full);

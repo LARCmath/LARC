@@ -12,6 +12,7 @@
  #   - Steve Cuccaro (IDA-CCS)                                    #
  #   - John Daly (LPS)                                            #
  #   - John Gilbert (UCSB, IDA adjunct)                           #
+ #   - Mark Pleszkoch (IDA-CCS)                                   #
  #   - Jenny Zito (IDA-CCS)                                       #
  #                                                                #
  # Additional contributors are listed in "LARCcontributors".      #
@@ -54,7 +55,16 @@ BINDIR = bin
 OBJDIR = obj
 SRCDIR = src
 
-# Get the local paths 
+# Please select the Operating System you are using:
+MY_OS = UNIX
+#MY_OS = MAC
+
+# Get the local paths
+ifeq ("$(wildcard local/Makefile.conf)","")
+  $(info  ERROR: You need to create a "local/Makefile.conf" file.)
+  $(info  NOTE: Sample files for various environments can be found in the "local" directory.)
+  $(error Terminating makefile)
+endif
 include local/Makefile.conf
 #    GMPIDIR (gmp-6 include),
 #    GMPLDIR (gmp-6 lib),
@@ -67,39 +77,23 @@ DOCDIR_HTML = html
 
 # the following determines which scalarType LARC is compiled with:
 # e.g. USE_REAL, USE_INTEGER, USE_COMPLEX, USE_MPINTEGER, ...
-ifeq ($(TYPE),REAL)
-   $(warning specified REAL type...)
-   SOURCE_FILE = $(SRCDIR)/typeREAL.h
-else ifeq ($(TYPE),INTEGER)
-   $(warning specified INTEGER type...)
-   SOURCE_FILE = $(SRCDIR)/typeINTEGER.h
-else ifeq ($(TYPE),COMPLEX)
-   $(warning specified COMPLEX type...)
-   SOURCE_FILE = $(SRCDIR)/typeCOMPLEX.h
-else ifeq ($(TYPE),MPREAL)
-   $(warning specified MPREAL type...)
-   SOURCE_FILE = $(SRCDIR)/typeMPREAL.h
-else ifeq ($(TYPE),MPCOMPLEX)
-   $(warning specified MPCOMPLEX type...)
-   SOURCE_FILE = $(SRCDIR)/typeMPCOMPLEX.h
-else ifeq ($(TYPE),MPINTEGER)
-   $(warning specified MPINTEGER type...)
-   SOURCE_FILE = $(SRCDIR)/typeMPINTEGER.h
-else ifeq ($(TYPE),MPRATIONAL)
-   $(warning specified MPRATIONAL type...)
-   SOURCE_FILE = $(SRCDIR)/typeMPRATIONAL.h
-else ifeq ($(TYPE),MPRATCOMPLEX)
-   $(warning specified MPRATCOMPLEX type...)
-   SOURCE_FILE = $(SRCDIR)/typeMPRATCOMPLEX.h
+
+SCA_LIST = REAL INTEGER BOOLEAN COMPLEX MPREAL MPCOMPLEX MPINTEGER MPRATIONAL MPRATCOMPLEX CLIFFORD UPPER LOWER
+SCA_TEST_LIST = REAL INTEGER COMPLEX MPREAL MPCOMPLEX MPINTEGER MPRATIONAL MPRATCOMPLEX CLIFFORD
+
+ifneq ($(filter $(TYPE),$(SCA_LIST)),)
+   $(warning specified $(TYPE) type...)
+   SOURCE_FILE = $(SRCDIR)/TypeFiles/type$(TYPE).h
 else
-$(warning Using default real type...)
-   SOURCE_FILE = $(SRCDIR)/typeREAL.h
+   $(warning Using default real type...)
+   SOURCE_FILE = $(SRCDIR)/TypeFiles/typeREAL.h
 endif
 
 
-OPTS = -O2 -g -pg -Wall -fPIC
+GIT_COMMIT_DATE = $(shell git show -s --format=%ci)
+OPTS = -O2 -g -Wall -fPIC -DGIT_COMMIT_DATE="\"$(GIT_COMMIT_DATE)\""
 CFLAGS = $(OPTS) -I$(SRCDIR) -I$(MPIDIR) -I$(GMPIDIR) -std=gnu99
-LIBS = -L$(MPLDIR) -L$(GMPLDIR) -lcurses -lm -lrt -lmpc -lmpfr -lgmp -lpthread -ltinfo
+LIBS = -L$(MPLDIR) -L$(GMPLDIR) -lncurses -lm -lmpc -lmpfr -lgmp -lpthread -ltinfo
 CC = gcc
 
 # The file larcSWIG_wrap.c is created by SWIG, and therefore may or may not
@@ -123,6 +117,7 @@ TARGET = lib/liblarc.a
 SO_TARGET = $(patsubst %.a, %.so, $(TARGET))
 
 DOCS = $(DOCDIR_HTML)/index.html
+DOCSRCS = src/high-level-doc.d $(wildcard $(SRCDIR)/*.py) $(wildcard $(SRCDIR)/python/*.py)
 
 .PHONY: all build clean unittests # tests install
 
@@ -142,8 +137,13 @@ $(TARGET): $(OBJS)
 	ar rcs $@ $(OBJS)
 	ranlib $@
 
-$(SO_TARGET): $(OBJS) # $(TARGET)
-	$(CC) -shared -o $@ $(OBJS)
+ifeq ($(MY_OS), UNIX)
+$(SO_TARGET): $(OBJS)
+	$(CC) -o $@ $(CFLAGS) -shared $^ $(LIBS) -Wl,-rpath=$(MPLDIR):$(GMPLDIR)
+else
+$(SO_TARGET): $(OBJS)
+	$(CC) -o $@ $(CFLAGS) -shared $^ $(LIBS) # -Wl,-rpath=$(MPLDIR):$(GMPLDIR)
+endif
 
 build: 
 	@mkdir -p obj
@@ -177,12 +177,16 @@ clean:
 #	install $(TARGET) $(DESTDIR)/$(PREFIX)/lib/  
 
 # we keep all the SWIG dependent stuff in SRCDIR to avoid problems later
+ifeq ($(MY_OS), UNIX)
 $(SRCDIR)/_larcSWIG.so: $(SRCDIR)/larcSWIG_wrap.o $(OBJS)
-	#$(CC) $(CFLAGS) -shared $^ -o $@ $(LIBS)
-	$(CC) $(CFLAGS) -shared $^ -o $@ $(LIBS) -Wl,-rpath=$(MPLDIR),-rpath=$(GMPLDIR)
+	$(CC) -o $@ $(CFLAGS) -shared $^ $(LIBS) -Wl,-rpath=$(MPLDIR):$(GMPLDIR)
+else
+$(SRCDIR)/_larcSWIG.so: $(SRCDIR)/larcSWIG_wrap.o $(OBJS)
+	ld -bundle -flat_namespace -undefined suppress  -o $@ $(OBJS) $(LIBS)
+endif
 
 $(SRCDIR)/larcSWIG_wrap.o: $(SRCDIR)/larcSWIG_wrap.c
-	$(CC) $(CFLAGS) $(PYINC) -c $< -o $@
+	$(CC) -c -o $@ $(CFLAGS) $(PYINC) $<
 
 # using SRCSNOWRAP avoids a dependency loop (larcSWIG_wrap.c shouldn't depend
 # on itself)
@@ -190,64 +194,34 @@ $(SRCDIR)/larcSWIG_wrap.c: $(SRCDIR)/larcSWIG.i $(SRCSNOWRAP) $(INCS)
 	swig -python $<
 
 # the binary executables do not depend on the python wrapper
+ifeq ($(MY_OS), UNIX)
 $(BINS): $(OBJS) $(BINDIR)
-	$(CC) $(CFLAGS) $(OBJS) -o $@ $(LIBS) -Wl,-rpath=$(MPLDIR),-rpath=$(GMPLDIR)
+	$(CC) -o $@ $(CFLAGS) $(OBJS) $(LIBS) -Wl,-rpath=$(MPLDIR):$(GMPLDIR)
+else
+$(BINS): $(OBJS) $(BINDIR)
+	$(CC) -o $@ $(CFLAGS) $(OBJS) $(LIBS) # -Wl,-rpath=$(MPLDIR):$(GMPLDIR)
+endif
 
 $(BINDIR): 
 	@test -d $(BINDIR)/ || mkdir -p $(BINDIR)
 
 $(OBJDIR)/%.o: $(SRCDIR)/%.c $(INCS)
 	@test -d $(OBJDIR)/ || mkdir -p $(OBJDIR)
-	$(CC) -c -o $@ $< $(CFLAGS)
+	$(CC) -c -o $@ $(CFLAGS) $<
 
-$(DOCS): $(SRCS) $(SRCDIR)/Doxyfile.in
+$(DOCS): $(SRCS) $(SRCDIR)/Doxyfile.in $(DOCSRCS)
 	doxygen $(SRCDIR)/Doxyfile.in
 
 
 
 unittests:
 	echo "Running unittests for all types:" > test_output
-	#python2.7 -m unittest discover -p 'test_unittest*.py' -s tests/python 2>> test_output
 
-	make TYPE=INTEGER
-	echo "TYPE=INTEGER" >> test_output
-	python3 -m unittest discover -p 'test_unittest*.py' -s tests/python 2>> test_output
-	#tests/python/run_unittests.py 2>> test_output
-
-	make TYPE=REAL
-	echo "TYPE=REAL" >> test_output
-	python3 -m unittest discover -p 'test_unittest*.py' -s tests/python 2>> test_output
-	#tests/python/run_unittests.py 2>> test_output
-
-	make TYPE=COMPLEX
-	echo "TYPE=COMPLEX" >> test_output
-	python3 -m unittest discover -p 'test_unittest*.py' -s tests/python 2>> test_output
-	#tests/python/run_unittests.py 2>> test_output
-
-	make TYPE=MPINTEGER
-	echo "TYPE=MPINTEGER" >> test_output
-	python3 -m unittest discover -p 'test_unittest*.py' -s tests/python 2>> test_output
-	#tests/python/run_unittests.py 2>> test_output
-
-	make TYPE=MPREAL
-	echo "TYPE=MPREAL" >> test_output
-	python3 -m unittest discover -p 'test_unittest*.py' -s tests/python 2>> test_output
-	#tests/python/run_unittests.py 2>> test_output
-
-	make TYPE=MPCOMPLEX
-	echo "TYPE=MPCOMPLEX" >> test_output
-	python3 -m unittest discover -p 'test_unittest*.py' -s tests/python 2>> test_output
-	#tests/python/run_unittests.py 2>> test_output
-
-	make TYPE=MPRATIONAL
-	echo "TYPE=MPRATIONAL" >> test_output
-	python3 -m unittest discover -p 'test_unittest*.py' -s tests/python 2>> test_output
-	#tests/python/run_unittests.py 2>> test_output
-
-	make TYPE=MPRATCOMPLEX
-	echo "TYPE=MPRATCOMPLEX" >> test_output
-	python3 -m unittest discover -p 'test_unittest*.py' -s tests/python 2>> test_output
-	#tests/python/run_unittests.py 2>> test_output
+	for s in $(SCA_TEST_LIST); do \
+           make TYPE=$$s; \
+           echo "TYPE=$$s" >> test_output; \
+           python3 -m unittest discover -p 'test_unittest*.py' -s tests/python 2>> test_output; \
+        done
 
 	echo "ALL TESTS COMPLETED" >> test_output
 	cat test_output

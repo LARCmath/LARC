@@ -12,6 +12,7 @@
  *   - Steve Cuccaro (IDA-CCS)                                    *
  *   - John Daly (LPS)                                            *
  *   - John Gilbert (UCSB, IDA adjunct)                           *
+ *   - Mark Pleszkoch (IDA-CCS)                                   *
  *   - Jenny Zito (IDA-CCS)                                       *
  *                                                                *
  * Additional contributors are listed in "LARCcontributors".      *
@@ -54,93 +55,189 @@
 
 #include <inttypes.h> //for printing uint64_t and int64_t
 #include <curses.h>
-#include "global.h"
+#include <ctype.h>
 #include "larc.h"
+#include "global.h"
+#include "organize.h"
 #include "io.h"
+#include <errno.h>
 
+/*!
+ * \file io.c
+ * \brief This file contains the routines which transfer data between disk
+ * and LARC.
+ *
+ * Uncompressed data can be read in either row-major-matrix or Matrix Market
+ * Exchange formats. Compressed data in LARCMatrix (json) format can be both
+ * read and written; sparse data can also be saved to disk as a list of 
+ * nonzero locations. There are also functions which change LARCMatrix data as
+ * it is being read or written, which may be of use on occasion. Small
+ * matrices can also be written to file or screen in uncompressed format.
+ */
 
-// FOUR ROUTINES FOR READING IN FROM ROW_MAJOR_LIST FORMAT:
-//
-// These two routines work with multiprecision data.
-// int64_t row_major_list_to_store_matrixID(char **dense_mat, 
-//                    mat_level_t        current_row_level, 
-//                    mat_level_t        current_col_level, 
-//                    int64_t        orig_num_cols 
-//                    )
-// mat_ptr_t row_major_list_to_store(scalarType  * dense_mat, 
-//                    mat_level_t        current_row_level, 
-//                    mat_level_t        current_col_level, 
-//                    int64_t        orig_num_cols 
-//                    )
-//
-// These two routines do NOT work with multiprecision data.
-// int64_t read_row_major_matrix_from_file_matrixID(char * file_path)
-// mat_ptr_t read_row_major_matrix_from_file(char * file_path)
-//
-// The *_matrixID routines are wrappers for the ones that return type
-// mat_ptr_t (pointers to matrices). They are used in our python interface
-// so we can avoid passing structure pointers, including those which hold
-// GMP multiprecision data.
-
-// row_major_list_to_store_matrixID():
-// This wrapper routine takes as its first argument an array of strings,
-// which will be converted to the proper scalarType value before calling 
-// the core function row_major_list_to_store().
-int64_t row_major_list_to_store_matrixID(char **dense_mat, 
-                    mat_level_t        current_row_level, 
-                    mat_level_t        current_col_level, 
-                    int64_t        orig_num_cols 
-                    )
+// This structure groups together all the information related to the 
+// quadtree-like structure used to change (row,col,val) information into
+// a properly compressed LARCMatrix.
+struct dataForQLS
 {
+        int64_t **quad;
+        mat_level_t *internal_node_level;
+        int64_t num_internal_nodes;
+        mat_level_t *leaf_level;
+};
 
-  // allocate sufficient space to store the matrix "dense" in memory
-  int64_t N = (1L << current_row_level) * (1L << current_col_level);
-  scalarType *dense = malloc(N*sizeof(scalarType));
 
-  // convert each string value in dense_mat to the proper scalar type
-  // and put it into our "dense" matrix
-  for (int64_t i = 0; i < N; i++){
-    sca_init(&(dense[i]));
-    sca_set_str(&(dense[i]), dense_mat[i]);
-  }
+// This structure groups together information about a sparse matrix which
+// was read in as (row,col,val) triplets. In MatrixMarketExchange format,
+// this type of data is labeled as 'coordinate'.
+struct dataByCoordinate
+{
+        unsigned *row, *col; 
+        scalarType *val;
+};
 
-  // call row_major_list_to_store to put "dense" into the matrixStore
-  mat_ptr_t C_ptr = row_major_list_to_store(dense, current_row_level, current_col_level, orig_num_cols); 
-  int64_t C_mID = get_matID_from_matPTR(C_ptr);
+// This structure groups together all the information needed for
+// writing a LARCmatrix json output file, or a unique list of scalars.
+typedef struct uniq_submatrix_array_struct
+{
+  char *array;
+  size_t   sizeArray;
+  size_t   larcSizeCounter;
+  size_t   numUniqScalars;
+} usas_t;
 
-  // clear the memory used to store "dense"
-  for (int64_t i = 0; i < N; i++)
-    sca_clear(&(dense[i]));
-  free(dense);
 
-  return C_mID;
+/*!
+ * \ingroup larc
+ * \brief allocates memory for a uniq_submatrix_array structure, used when writing a LARCmatrix json output file or a unique list of scalars
+ *
+ * \param packedID the matrix (either to be written or to have its unique scalars extracted and written)
+ * \result A pointer to the structure allocated
+ */
+static usas_t *create_usasPTR(int64_t packedID) {
+    if (packedID == MATRIX_ID_INVALID)
+    {
+        fprintf(stderr,"in %s, invalid matrixID passed\n",__func__);
+        return NULL;
+    }
+    usas_t *usasPTR = calloc(1, sizeof(usas_t));
+    //    size_t   larcSizeCounter= 0;
+    //    size_t   numUniqScalars = 0;
+    int64_t matrixID = MID_FROM_PID(packedID);
+    usasPTR->sizeArray = matrixID+1;
+    usasPTR->array = calloc(matrixID+1, sizeof(char));
+    if (usasPTR->array == NULL) {
+        ALLOCFAIL();
+        return 0;
+    }
+    return(usasPTR);
+}
+  
+/*!
+ * \ingroup larc
+ * \brief frees memory for a uniq_submatrix_array structure
+ *
+ * \param usasPTR The pointer to the structure to be freed
+ */
+static void free_usasPTR(usas_t *usasPTR) {
+    free(usasPTR->array);
+    free(usasPTR);
 }
 
+/*!
+ * \ingroup larc
+ * \brief This routine recursively fills the uniq_submatrix_array structure for the given packedID.
+ *
+ * \param usasPTR the (previously allocated) structure which will hold the data
+ * \param packedID the matrix (either to be written or to have its unique scalars extracted and written)
+ */
+static void fill_usasPTR(usas_t *usasPTR, int64_t packedID)
+{
+    int local_verbose = 0;
 
+    // In row and column vectors skip over nonfilled quadrants
+    if (packedID == MATRIX_ID_INVALID) return;
+  
+    int64_t matrixID = MID_FROM_PID(packedID);
+
+    if (local_verbose)
+    {
+	printf("In function %s the matrixID is %ld\n",__func__,matrixID);
+    }
+    
+    // simple error checking
+    if (matrixID >= usasPTR->sizeArray) {
+        printf("This can never happen, in function %s!\n", __func__);
+        exit(0);
+    }
+
+    if (local_verbose)
+    {
+	printf("Checking to see if array[matrixID] is nonzero \n");
+    }
+    
+    // if we have seen this matrix before
+    if (usasPTR->array[matrixID] != 0) return;
+    
+    if (local_verbose)
+    {
+	printf("The value in array[matrixID] is %d\n",usasPTR->array[matrixID]);
+    }
+    
+    // have not seen this submatrix yet
+    // (usas_PTR.array[packedID] == 0)
+    // scalar matrix
+    if (IS_SCALAR(packedID))
+    {
+        usasPTR->array[matrixID] = 1;
+        ++usasPTR->numUniqScalars;
+    }
+    // nonscalar matrix	
+    else
+    {
+        usasPTR->array[matrixID] = 2;
+
+        // recursively check the children of m_ID
+        matns_ptr_t m_PTR = (matns_ptr_t)get_recordPTR_from_pID(packedID,
+                       "", __func__, 0);
+        for (int i=0; i<4; ++i)
+            fill_usasPTR(usasPTR,m_PTR->subMatList[i]);
+    }
+    // larcSizeCounter will be the number of unique quadrant submatrices
+    ++usasPTR->larcSizeCounter;
+
+    if (local_verbose)
+    {
+        printf(" \n");
+    }
+
+   return;
+}
+
+    
 /****************************************************************
- *                     row_major_list_to_store
+ *              recursive_row_major_list_to_store
  *    jszito note: John Gilbert taught me this neat recursive method;
- *                 he says comes from the old Fortran blas routines.
- *    It takes a dense m by n matrix which is given as a list of all 
- *    its entries in row major order: 
- *                   a00 a01 ... a0(n-1) a10 a11 ... a1(n-1) ...  
- *                        a(m-1)0 a(m-1)1 ... a(m-1)(n-1)
- *    And specifies a submatrix by giving its top left corner aij
- *    and its dimension.
- *    This routine works recursively on the 4 subpanels
- *    It loads the matrix into the matrix store c using get_matPTR_from_array_of_four_subMatPTRs
- *    which returns the matrix index of the matrix in the store.
+ *                 he says comes from the old Fortran BLAS
+ *                 (basic linear algebra subprograms).
+ *    It takes a dense m by n matrix which is given as a 1-dim list of 
+ *    all its entries in row major order (reading each row in order):
+ *                   a00 a01 ... a0(n-1)
+ *                   a10 a11 ... a1(n-1)
+ *                    ...  
+ *                   a(m-1)0 a(m-1)1 ... a(m-1)(n-1)
+ *         where m = 2^row_level, n= 2^col_level, and 
+ *         orig_num_cols = n
+ *         aij are scalars of whatever scalarType we are using.
+ *    We specify a submatrix by giving its top left corner aij
+ *    and its dimension (and the orginal number of columns).
  *
- *    This function gets called from the top level of an m x n 
- *    matrix and acts on dense_mat which is an m*n long array 
- *    of complex values
- *    and is the row major ordering of a complex matrix
- *                   a00 a01 ... a0(n-1) a10 a11 ... a1(n-1) ...  
- *                        a(m-1)0 a(m-1)1 ... a(m-1)(n-1)
- *    where m = 2^row_level, n= 2^col_level, and 
- *    orig_num_cols = n
+ *    This routine works recursively on the 4 submatrixIDs.
+ *    It loads the matrix into the matrix store c using
+ *    get_pID_from_array_of_four_sub_pIDs
+ *    which returns the matrixID of the matrix in the store.
  *
- *    Any sub matrix in the original matrix can be specified by 
+ *    Any quadrant submatrix in the original matrix can be specified by 
  *    passing: 
  *       the size of the original matrix orig_num_cols 
  *             which gives the number of elements in each row
@@ -152,179 +249,216 @@ int64_t row_major_list_to_store_matrixID(char **dense_mat,
  *           are in the COL_VECTOR case.
  *       the position in dense_mat at which the submatrix starts
  *             e.g. in a 4 by 4 matrix, submatrix[0] starts at 0
- *                  submatrix[1] starts at 8, submatrix[2] starts at 2,
+ *                  submatrix[1] starts at 2, submatrix[2] starts at 8,
  *                  and submatrix[3] starts at 10, and
  *       the subarray of dense_mat that starts at that index.
  *
  *    The recursive nature of the call takes care of everything else.
- *    When get_matPTR_from_array_of_four_subMatPTRs has the mat_ptr of each of the four submatrices
- *    (in the vector cases two of these are MATRIX_PTR_INVALID)
+ *    When get_pID_from_array_of_four_sub_pIDs has the MatrixID of
+ *    each of the four quadrant submatrices
+ *    (in the vector cases two of these are MATRIX_ID_INVALID),
  *    then it can be used to find the mat_ptr of a matrix.
  *    
  **********************************************************************/
-mat_ptr_t row_major_list_to_store(scalarType  * dense_mat, 
+
+/*!
+ * \ingroup larc
+ *
+ * \brief Recursive routine used to add a matrix to the MatrixStore
+ *
+ * This recursive routine requires the original number of columns
+ * (the paramater dim_whole) at lower levels of the recursion.
+ *
+ * \param dense_mat A pointer to scalarType; the matrix to be stored
+ * \param current_row_level The base2 log of the number of rows in the current matrix
+ * \param current_col_level The base2 log of the number of columns in the current matrix
+ * \param orig_num_cols The number of columns of the matrix originally passed to the recursion
+ * \return The packedID of the stored matrix.
+ */
+static int64_t recursive_row_major_list_to_store(scalarType  * dense_mat, 
+                    mat_level_t current_row_level, 
+                    mat_level_t current_col_level, 
+                    int64_t     orig_num_cols)
+{
+#ifdef DEBUG_IO_C
+  printf("--> %s : %s: %d\n", __FILE__, __func__, __LINE__);
+#endif // #ifdef DEBUG_IO_C
+
+  int verbose = 0;
+
+  // SCALAR CASE
+  if ((current_row_level == 0) && (current_col_level == 0)){
+    return (get_scalarPTR_for_scalarVal(*dense_mat))->packedID;
+  }
+
+  // Need this for remaining cases
+  int64_t subMatList[4];  // indices of submatrices
+
+
+  // ROW VECTOR
+  if (current_row_level == 0) 
+  {
+    uint64_t new_num_cols = (uint64_t)1 << (current_col_level-1);   // divide current number by two
+
+    // top corner
+    subMatList[0] = recursive_row_major_list_to_store(dense_mat, 0,
+                    current_col_level-1,orig_num_cols);
+
+    // step right dim_new cols
+    subMatList[1] = recursive_row_major_list_to_store(dense_mat + new_num_cols,
+                    0, current_col_level-1,orig_num_cols);
+
+    // step down dim_new rows
+    subMatList[2] = MATRIX_ID_INVALID;
+
+    // step down and over dim_new rows and cols
+    subMatList[3] = MATRIX_ID_INVALID;
+
+#ifdef DEBUG_IO_C
+  printf("<--%s : %s: %d\n", __FILE__, __func__,  __LINE__);
+#endif // #ifdef DEBUG_IO_C 
+
+  }
+
+  // COLUMN VECTOR
+  else if (current_col_level == 0)
+  {
+    uint64_t new_num_rows = (uint64_t)1 << (current_row_level-1);   // divide current number by two
+
+    // top corner
+    subMatList[0] = recursive_row_major_list_to_store(dense_mat,
+                    current_row_level-1, 0, orig_num_cols);
+
+    // step right dim_new cols
+    subMatList[1] = MATRIX_ID_INVALID;
+
+    // step down dim_new rows
+    subMatList[2] = recursive_row_major_list_to_store(dense_mat +
+           new_num_rows*orig_num_cols, current_row_level-1, 0, orig_num_cols); 
+
+    // step down and over dim_new rows and cols
+    subMatList[3] = MATRIX_ID_INVALID;
+
+#ifdef DEBUG_IO_C
+  printf("<--%s : %s: %d\n", __FILE__, __func__,  __LINE__);
+#endif // #ifdef DEBUG_IO_C
+
+  }
+
+  // MATRIX CASE
+  else 
+  {
+    uint64_t new_num_cols = (uint64_t)1 << (current_col_level-1);   // divide current number by two
+    uint64_t new_num_rows = (uint64_t)1 << (current_row_level-1);   // divide current number by two
+
+    if (verbose) {
+      printf("\nIn recursive call with orig_num_cols = %"PRId64"\n",orig_num_cols);
+      printf("  The four subsubMatLists will be at row level %"PRId32", col level %"PRId32", ",
+                current_row_level-1, current_col_level-1);
+      printf("and will have offsets: \n");
+      printf("     subMatList[0]: 0\n");
+      printf("     subMatList[1]: new_num_cols = %" PRIu64 "\n",new_num_cols);
+      printf("     subMatList[2]: new_num_rows*orig_num_cols = %" PRIu64 "\n",
+                new_num_rows*orig_num_cols);
+      printf("     subMatList[3]: new_num_rows*orig_num_cols+new_num_cols = %" PRIu64 "\n",
+                new_num_rows*orig_num_cols+new_num_cols);
+    }  // end verbose
+
+    // top corner
+    subMatList[0] = recursive_row_major_list_to_store(dense_mat,
+           current_row_level-1, current_col_level-1, orig_num_cols);
+
+    // step right dim_new cols
+    subMatList[1] = recursive_row_major_list_to_store(dense_mat +
+           new_num_cols, current_row_level-1, current_col_level-1,
+           orig_num_cols); 
+
+    // step down dim_new rows
+    subMatList[2] = recursive_row_major_list_to_store(dense_mat +
+           new_num_rows*orig_num_cols, current_row_level-1, 
+           current_col_level-1, orig_num_cols); 
+
+    // step down and over dim_new rows and cols
+    subMatList[3] = recursive_row_major_list_to_store(dense_mat +
+           new_num_rows*orig_num_cols+new_num_cols,
+           current_row_level-1, current_col_level-1, orig_num_cols); 
+#ifdef DEBUG_IO_C
+  printf("<--%s : %s: %d\n", __FILE__, __func__, __LINE__);
+#endif // #ifdef DEBUG_IO_C 
+
+  }
+  return get_pID_from_array_of_four_sub_pIDs(subMatList,
+         current_row_level, current_col_level);
+}
+
+// TWO ROUTINES FOR READING IN FROM ROW_MAJOR_LIST FORMAT:
+//
+// This routine works with multiprecision data.
+// int64_t row_major_list_to_store(char **dense_mat, 
+//                    mat_level_t        current_row_level, 
+//                    mat_level_t        current_col_level, 
+//                    int64_t        orig_num_cols 
+//                    )
+//
+// This routine does NOT work with multiprecision data.
+// int64_t read_row_major_matrix_from_file(char * file_path)
+//
+// row_major_list_to_store():
+// This wrapper routine takes as its first argument an array of strings,
+// which will be converted to the proper scalarType value before calling 
+// the core function recursive_row_major_list_to_store().
+int64_t row_major_list_to_store(char **dense_mat, 
                     mat_level_t        current_row_level, 
                     mat_level_t        current_col_level, 
                     int64_t        orig_num_cols 
                     )
 {
-#ifdef DEBUG
-  printf("--> %s : %s: %d\n", __FILE__, __func__, __LINE__);
-#endif
 
-  // do we want to add a check to see if dense_mat list has
-  // 2^col_level*2^row_level entries?
-  // SAC: no, this is a recursive routine and the check should be outside
-
-  
-  // This printing for verbose has been updated for nonsquare matrices
-  // but not for scalarType handling. Note that this is inside a recursive
-  // routine, so the printing is likely to be messy.
-  int verbose = 0;
-#if 0
-  if (verbose) { 
-    printf("\nIn subroutine row_major_list_to_store, with row level ");
-    printf("%d and column level %d\n",current_row_level,current_col_level);
-    printf("and orig_num_cols %ld\n",orig_num_cols);
-    int i,j;
-    for (i=0; i < (1L << current_row_level); ++i) {
-      for (j=0; j < (1L << current_col_level); ++j) {
-#ifdef USE_COMPLEX
-        printf("%4.1lf + %4.1lf i, \t ",creall(dense_mat[i*orig_num_cols+j]),
-                               cimagl(dense_mat[i*orig_num_cols+j]));
-#else
-        printf("%4.1lf, \t ",dense_mat[i*orig_num_cols+j]);
-#endif
-      }
-      printf("\n");
-    }
-  }  // end verbose
-#endif
-    
-  // SCALAR CASE
-  if ((current_row_level == 0) && (current_col_level == 0)){
-    return get_valMatPTR_from_val(*dense_mat);
+  // allocate sufficient space to store the matrix "dense" in memory
+  uint64_t N = ((uint64_t)1 << current_row_level) 
+               * ((uint64_t)1 << current_col_level);
+  scalarType *dense = malloc(N*sizeof(scalarType));
+  if (dense == NULL) {
+    fprintf(stderr,"ERROR in %s, line %d: Out of memory.\n", __func__, __LINE__);
+    exit(1);
   }
 
-  // Need this for remaining cases
-  mat_ptr_t panel[4];  // indices of submatrices
-
-
-  // ROW VECTOR
-  if ((current_row_level == 0) && (current_col_level > 0)){
-    int64_t new_num_cols = 1L << (current_col_level-1);   // divide current number by two
-
-    // top corner
-    panel[0] = row_major_list_to_store(dense_mat,0,current_col_level-1,orig_num_cols);
-
-    // step right dim_new cols
-    panel[1] = row_major_list_to_store(dense_mat+new_num_cols,0, current_col_level-1,orig_num_cols); 
-
-    // step down dim_new rows
-    panel[2] = MATRIX_PTR_INVALID;
-
-    // step down and over dim_new rows and cols
-    panel[3] = MATRIX_PTR_INVALID;
-
-#ifdef DEBUG
-  printf("<--%s : %s: %d\n", __FILE__, __func__,  __LINE__);
-#endif  
-
+  // convert each string value in dense_mat to the proper scalar type
+  // and put it into our "dense" matrix
+  for (int64_t i = 0; i < N; i++){
+    sca_init(&(dense[i]));
+    sca_set_str(&(dense[i]), dense_mat[i]);
   }
 
+  // call recursive_row_major_list_to_store to put "dense" into the MatrixStore
+  // (or possibly ScalarStore)
+  int64_t C_pID = recursive_row_major_list_to_store(dense,
+                  current_row_level, current_col_level, orig_num_cols); 
 
-  // COLUMN VECTOR
-  if ((current_row_level > 0) && (current_col_level == 0)){
-    int64_t new_num_rows = 1L << (current_row_level-1);   // divide current number by two
+  // clear the memory used to store "dense"
+  for (int64_t i = 0; i < N; i++)
+    sca_clear(&(dense[i]));
+  free(dense);
 
-    // top corner
-    panel[0] = row_major_list_to_store(dense_mat,current_row_level-1,0,orig_num_cols);
-
-    // step right dim_new cols
-    panel[1] = MATRIX_PTR_INVALID;
-
-    // step down dim_new rows
-    panel[2] = row_major_list_to_store(dense_mat+new_num_rows*orig_num_cols,current_row_level-1,0,orig_num_cols); 
-
-    // step down and over dim_new rows and cols
-    panel[3] = MATRIX_PTR_INVALID;
-
-#ifdef DEBUG
-  printf("<--%s : %s: %d\n", __FILE__, __func__,  __LINE__);
-#endif  
-
-  }
-
-  // MATRIX CASE
-  if ((current_row_level > 0) && (current_col_level > 0)){
-    int64_t new_num_cols = 1L << (current_col_level-1);   // divide current number by two
-    int64_t new_num_rows = 1L << (current_row_level-1);   // divide current number by two
-
-    if (verbose) {
-      printf("\nIn recursive call with orig_num_cols = %"PRId64"\n",orig_num_cols);
-      printf("  The four subpanels will be at row level %"PRId32", col level %"PRId32", ",
-                current_row_level-1, current_col_level-1);
-      printf("and will have offsets: \n");
-      printf("     panel[0]: 0\n");
-      printf("     panel[1]: new_num_cols = %ld\n",new_num_cols);
-      printf("     panel[2]: new_num_rows*orig_num_cols = %ld\n",
-                new_num_rows*orig_num_cols);
-      printf("     panel[3]: new_num_rows*orig_num_cols+new_num_cols = %ld\n",
-                new_num_rows*orig_num_cols+new_num_cols);
-    }  // end verbose
-
-    // top corner
-    panel[0] = row_major_list_to_store(dense_mat, current_row_level-1,
-                                       current_col_level-1, orig_num_cols);
-
-    // step right dim_new cols
-    panel[1] = row_major_list_to_store(dense_mat+new_num_cols, current_row_level-1, 
-                                       current_col_level-1, orig_num_cols); 
-
-    // step down dim_new rows
-    panel[2] = row_major_list_to_store(dense_mat+new_num_rows*orig_num_cols, current_row_level-1, 
-                                       current_col_level-1, orig_num_cols); 
-
-    // step down and over dim_new rows and cols
-    panel[3] = row_major_list_to_store(dense_mat+new_num_rows*orig_num_cols+new_num_cols,
-                                       current_row_level-1, current_col_level-1, orig_num_cols); 
-#ifdef DEBUG
-  printf("<--%s : %s: %d\n", __FILE__, __func__, __LINE__);
-#endif  
-
-  }
-
-  return get_matPTR_from_array_of_four_subMatPTRs(panel, current_row_level, current_col_level);
+  return C_pID;
 }
 
 /****************************************************************
- *  python interface: read_row_major_matrix_from_file_matrixID
+ *  python interface: read_row_major_matrix_from_file
  ****************************************************************/
-int64_t read_row_major_matrix_from_file_matrixID(char * file_path)
+int64_t read_row_major_matrix_from_file(char * file_path)
 {
-  mat_ptr_t m_ptr = read_row_major_matrix_from_file(file_path);
-  int64_t m_mID = get_matID_from_matPTR(m_ptr);
-  return m_mID;
-}
 
-
-/****************************************************************
- *  read_row_major_matrix_from_file
- *  This routine should now handle multiprecision data!
- ****************************************************************/
-mat_ptr_t read_row_major_matrix_from_file(char * file_path)
-{
-#ifdef DEBUG
+#ifdef DEBUG_IO_C
   printf("--> %s : %s: %d\n", __FILE__, __func__, __LINE__);
-#endif  
+#endif // #ifdef DEBUG_IO_C 
   int verbose = 0;
   int error_code = 0;
-  int errno = 0; 
 
   if (verbose) printf("In %s\n", __func__);
 
   FILE *fp;
-  if((fp = fopen(file_path, "r+")) == NULL) {
+  if((fp = fopen(file_path, "r")) == NULL) {
     fprintf(stderr,"No such file: %s\n",file_path);
     exit(1);    
   }
@@ -352,10 +486,10 @@ mat_ptr_t read_row_major_matrix_from_file(char * file_path)
     error_code = 2;
   }
   if (error_code) {
-#ifdef DEBUG
+#ifdef DEBUG_IO_C
     printf("<-- %s : fail: %d\n", __FILE__, __LINE__);
-#endif  
-    return (MATRIX_PTR_INVALID); 
+#endif // #ifdef DEBUG_IO_C 
+    return MATRIX_ID_INVALID; 
   } 
 
   // if the file is open but nothing is left to read print EOF
@@ -363,30 +497,30 @@ mat_ptr_t read_row_major_matrix_from_file(char * file_path)
     fputs("EOF",stderr);
     fprintf(stderr,"ERROR: File stopped earlier than expected.\n");
     fclose(fp);
-#ifdef DEBUG
+#ifdef DEBUG_IO_C
     printf("<-- %s : fail: %d\n", __FILE__, __LINE__);
-#endif  
-    return (MATRIX_PTR_INVALID); 
+#endif // #ifdef DEBUG_IO_C 
+    return MATRIX_ID_INVALID; 
   }
 
   // successfully read the level
   if (verbose)   printf("  levels are %d %d\n",(int)row_level, (int)col_level);
 
   // calculate size of the array
-  int64_t array_size = (1L << (row_level+col_level));
-  if (verbose)  printf("  array length is %ld\n", array_size);
+  uint64_t array_size = (uint64_t)1 << (row_level+col_level);
+  if (verbose)  printf("  array length is %" PRIu64 "\n", array_size);
 
   // Now we will handle the entries of the matrix
   scalarType * matrix_array;
 
   // Allocate space for the array of scalarType
-  if (!(matrix_array = calloc(array_size,sizeof(scalarType)) )) {
+  if (NULL==(matrix_array = calloc(array_size,sizeof(scalarType)) )) {
     error_code = 1;  // unable to allocate space for array
     fprintf(stderr,"ERROR: Unable to allocate space for array.\n");
-#ifdef DEBUG
+#ifdef DEBUG_IO_C
     printf("<-- %s : fail: %d\n", __FILE__, __LINE__);
-#endif  
-    return (MATRIX_PTR_INVALID); 
+#endif // #ifdef DEBUG_IO_C 
+    return MATRIX_ID_INVALID; 
   } 
 
   // Read the array of numbers 
@@ -397,17 +531,17 @@ mat_ptr_t read_row_major_matrix_from_file(char * file_path)
      // format for numbers must not include whitespace!
      int ret = fscanf(fp,"%s\n",a);
      if (ret == EOF) {
-        fprintf(stderr,"ERROR: fscanf() failed to read a line (i=%ld)",i);
+        fprintf(stderr,"ERROR: fscanf() failed to read a line (i=%" PRId64 ")",i);
         break;
      }
      else if (errno != 0) {
         perror("fscanf");
-        fprintf(stderr,"(i=%ld)\n",i);
+        fprintf(stderr,"(i=%" PRId64 ")\n",i);
         break;
      }
      else if (ret == max_size) {
         fprintf(stderr,"ERROR: line read by fscanf() may exceed ");
-        fprintf(stderr,"%d characters (i=%ld)\n",max_size,i);
+        fprintf(stderr,"%d characters (i=%" PRId64 ")\n",max_size,i);
      }
      sca_init(&(matrix_array[i]));
      sca_set_str(&(matrix_array[i]), a);
@@ -415,25 +549,25 @@ mat_ptr_t read_row_major_matrix_from_file(char * file_path)
 
   // if the file is open but nothing is left to read print EOF
   if(feof(fp)){
-    fputs("EOF",stderr);
+    fputs("EOF row major reader.\n",stderr);
   }
 
   fclose(fp);
 
-  mat_ptr_t ret_ptr;
+  int64_t m_pID;
   if (array_size == i) {
-#ifdef DEBUG
+#ifdef DEBUG_IO_C
     printf("<-- %s : %s success: %d\n", __FILE__, __func__,__LINE__);
-#endif  
-    ret_ptr = row_major_list_to_store(matrix_array,row_level,col_level,
-						1L<<col_level);
+#endif // #ifdef DEBUG_IO_C 
+    m_pID = recursive_row_major_list_to_store(matrix_array,
+                row_level,col_level,(uint64_t)1<<col_level);
   }
   else {
     if (verbose) printf("Failed to read row major matrix from file.\n");
-#ifdef DEBUG
+#ifdef DEBUG_IO_C
     printf("<-- %s : %s fail: %d\n", __FILE__, __func__, __LINE__);
-#endif  
-    ret_ptr = MATRIX_PTR_INVALID;
+#endif // #ifdef DEBUG_IO_C 
+    m_pID = MATRIX_ID_INVALID;
   }
 
   // clean up any space allocated by sca_init
@@ -441,106 +575,108 @@ mat_ptr_t read_row_major_matrix_from_file(char * file_path)
   // clean up scalarType array
   free(matrix_array);
 
-  return ret_ptr;
-}  // end read_row_major_matrix_from_file
-
-
-// FOUR NAIVE MATRIX PRINTING ROUTINES
-// * these routines print out the full matrix with no compression, and must
-// * be used carefully...
-// void print_naive_by_matID(int64_t A_mID)
-// void print_naive_by_matPTR(mat_ptr_t ptr_A)
-// void write_naive_by_matID(int64_t A_mID, char * filename)
-// void write_naive_by_matPTR(mat_ptr_t ptr_A, char * filename)
-
-/*******************************************************************
-*                       (naive) print_naive_by_matID       *
-* Python Interface for print_naive_by_matPTR      			*
-* accepts a matrixID for matrix to print                           *
-* Converts to a pointer before calling								*
-********************************************************************/
-void print_naive_by_matID(int64_t A_mID)
-{  
-  // get the matrix pointer from the matrixID, and see if still in store 
-  mat_ptr_t A_ptr = get_matPTR_from_matID(A_mID, "", __func__,0);
-
-  if (A_ptr == MATRIX_PTR_INVALID) { 
-      fprintf(stderr,"MatrixID %ld is INVALID.\n", A_mID);
-      exit(1); 
-  }
-
-  // should have a valid matrix pointer, to call internal routine for printing
-  print_naive_by_matPTR(A_ptr);
+  return m_pID;
 }
 
 
-/********************************************************************
-*                       (naive) print_matrix  (to screen)           *
-********************************************************************/
-void print_naive_by_matPTR(mat_ptr_t ptr_A)
-{
-  int i,j;
-  int row_level =  matrix_row_level(ptr_A);
-  int col_level =  matrix_col_level(ptr_A);
-  unsigned row_dim = 1 << row_level;
-  unsigned col_dim = 1 << col_level;
+// TWO NAIVE MATRIX PRINTING ROUTINES
+// * these routines print out the full matrix with no compression, and must
+// * be used carefully...
+// void print_naive(int64_t A_pID)
+// void fprint_naive(int64_t A_pID, char * filename)
 
-  // limit naive printing to reasonable sizes
-  if (!row_dim || !col_dim)
+/*******************************************************************
+*                       (naive) print_naive       *
+* accepts a matrixID for matrix to print                           *
+* Converts to a pointer before calling                                                                *
+********************************************************************/
+void print_naive(int64_t A_pID)
+{
+  // The following checks to ensure that m_pID
+  // has valid record pointer (eg, not RECORD_PTR_INVALID)
+  record_ptr_t m_Rptr;
+  check_validity_one_input(A_pID, __func__, &m_Rptr);
+
+  char *entry_string;
+
+  if (IS_SCALAR(A_pID))
   {
-        fprintf(stderr,"in print_naive_by_matPTR, dimension of matrix too big\n");
-        fprintf(stderr,"to fit into a 32-bit integer - we're not printing that!\n");
+    mats_ptr_t A_ptr = (mats_ptr_t)m_Rptr;
+    entry_string = sca_get_readable_approx_str(A_ptr->scalar_value);
+    printf("%s\n", entry_string);
+    free(entry_string);
+    return;
+  }
+
+  // get the matrix pointer from the matrixID, and see if still in store
+  matns_ptr_t A_ptr = (matns_ptr_t)m_Rptr;
+
+  int i,j;
+  int row_level =  A_ptr->row_level;
+  int col_level =  A_ptr->col_level;
+
+  // set the maximum level for printing a matrix
+  // these numbers are intentionally set larger than what we think
+  // would be reasonable for a matrix printed to a terminal window
+#ifdef IS_MP
+  int max_print_level = 6;
+#elif defined(IS_COMPLEX)
+  int max_print_level = 7;
+#else
+  int max_print_level = 10;
+#endif
+
+  if (row_level>max_print_level || col_level>max_print_level)
+  {
+        fprintf(stderr,"in %s, matrix has row level %d",__func__,row_level);
+        fprintf(stderr," and column level %d,\n",col_level);
+        fprintf(stderr,"which is too large to naive print to screen. ");
+        fprintf(stderr,"If you must do this anyway,\nuse write_naive routine");
+        fprintf(stderr," with 'stdout' as output filename\n");
         return;
   }
 
   // before continuing, calculate number of characters to be printed
-  // (this could double the time required for printing, we decided that was OK)
-  scalarType *entry;
-  char *entry_string;
+  // and check that the total number that will be printed is less than
+  // MAX_TO_PRINT. (this could double the time required for printing,
+  // we decided that was OK)
+#define MAX_TO_PRINT 100000
   uint64_t c_counter, max_columns, max_chars;
 
+  unsigned row_dim = 1 << row_level;
+  unsigned col_dim = 1 << col_level;
   max_chars = max_columns = 0;
-  for(i = 0;i<row_dim;i++) {
+  for (i = 0;i<row_dim;i++) {
     c_counter = 0;
-    for(j = 0;j<col_dim; j++) {
-      entry = &matrix_trace(get_valMatPTR_from_matPTR_and_coords(i, j, ptr_A));
-      entry_string = sca_get_str(*entry);
+    for (j = 0;j<col_dim; j++) {
+      mats_ptr_t e_ptr = get_scalarPTR_from_pID_and_coords(i, j, A_pID);
+      entry_string = sca_get_readable_approx_str(e_ptr->scalar_value);
       c_counter += strlen(entry_string)+1;
       free(entry_string);
     }
     c_counter += 2;
     max_chars += c_counter;
     max_columns = MAX(max_columns,c_counter);
+    if (max_chars>MAX_TO_PRINT) break;
   }
-
-  if (VERBOSE>BASIC) {
-    printf("%s given matrix which, if printed, would require\n", __func__);
-    printf("%lu characters total, with a maximum of \n", max_chars);
-    printf("%lu characters per row of the matrix\n", max_columns);
-  }
-
-  // set the maximum level for printing a matrix
-  // these numbers are intentionally set larger than what we think
-  // would be reasonable for a matrix printed to a terminal window
-# if defined(USE_INTEGER) || defined(USE_REAL)
-  int max_print_level = 10;
-# elif defined(USE_COMPLEX)
-  int max_print_level = 7;
-# else // multiprecision type
-  int max_print_level = 6;
-#endif
 
   // limit naive printing to reasonable size
-  if (row_level>max_print_level || col_level>max_print_level ||
-                max_chars>100000)
+  if (max_chars>MAX_TO_PRINT)
   {
         fprintf(stderr,"in %s, matrix has dimensions",__func__);
         fprintf(stderr," %u x %u\n",row_dim,col_dim);
-        fprintf(stderr,"and would require %lu printed characters,\n",max_chars);
+        fprintf(stderr,"and requires more than %" PRIu64 " printed characters,\n",
+                max_chars);
         fprintf(stderr,"which is too large to naive print to screen. ");
         fprintf(stderr,"If you must do this anyway,\nuse write_naive routine");
         fprintf(stderr," with 'stdout' as output filename\n");
         return;
+  }
+
+  if (VERBOSE>BASIC) {
+    printf("%s given matrix which, if printed, would require\n", __func__);
+    printf("%" PRIu64 " characters total, with a maximum of \n", max_chars);
+    printf("%" PRIu64 " characters per row of the matrix\n", max_columns);
   }
 
   // determine size of terminal using curses library
@@ -554,8 +690,8 @@ void print_naive_by_matPTR(mat_ptr_t ptr_A)
   c_counter = maxrow; // avoids compiler warning that maxrow set, unused
   for(i = 0; i<row_dim; i++) {
     // find the value to be printed in string form
-    entry = &matrix_trace(get_valMatPTR_from_matPTR_and_coords(i, 0, ptr_A));
-    entry_string = sca_get_str(*entry);
+    mats_ptr_t e_ptr = get_scalarPTR_from_pID_and_coords(i, 0, A_pID);
+    entry_string = sca_get_readable_approx_str(e_ptr->scalar_value);
     // always print first element in row without checking line length
     printf("%s ", entry_string);
     c_counter = strlen(entry_string)+1;
@@ -563,8 +699,8 @@ void print_naive_by_matPTR(mat_ptr_t ptr_A)
 
     for(j = 1; j<col_dim; j++) {
       // find the value to be printed in string form
-      entry = &matrix_trace(get_valMatPTR_from_matPTR_and_coords(i, j, ptr_A));
-      entry_string = sca_get_str(*entry);
+      mats_ptr_t e_ptr = get_scalarPTR_from_pID_and_coords(i, j, A_pID);
+      entry_string = sca_get_readable_approx_str(e_ptr->scalar_value);
       // Determine if printing this string will cause the number of characters
       // printed for this line to be greater than the terminal width, and if it
       // would, start a new indented line.
@@ -578,51 +714,54 @@ void print_naive_by_matPTR(mat_ptr_t ptr_A)
       printf("%s ", entry_string);
       free(entry_string);
     }
-  // always put newline at end of matrix row
-  printf("\n");
+    // always put newline at end of matrix row
+    printf("\n");
   }
+  fflush(stdout);
 }
-
 
 
 /********************************************************************
 * Python interface version of (naive) print_matrix_to_file          *
 *   this could be implemented less naively ...                      *
 ********************************************************************/
-void write_naive_by_matID(int64_t A_mID, char * filename)
+void fprint_naive(int64_t A_pID, char * filename)
 {
-  // get the matrix pointer from the matrixID, and see if still in store 
-  mat_ptr_t A_ptr = get_matPTR_from_matID(A_mID, "", __func__,0);
-  if (A_ptr == MATRIX_PTR_INVALID) { exit(1); }
+  // The following checks to ensure that m_pID
+  // has valid record pointer (eg, not RECORD_PTR_INVALID)
+  record_ptr_t m_Rptr;
+  check_validity_one_input(A_pID, __func__, &m_Rptr);
 
-  // should have a valid matrix pointer, to call internal routine for printing matrix to a file
-  write_naive_by_matPTR(A_ptr, filename);
-
-}
-
-
-
-/********************************************************************
-*                       (naive) print_matrix_to_file                *
-*   this could be implemented less naively ...                      *
-********************************************************************/
-void write_naive_by_matPTR(mat_ptr_t ptr_A, char * filename)
-{
   FILE *f;
   // remember strcmp returns 0 on equality
   if (strcmp(filename,"stdout")) f = fopen(filename, "w");
   else f = stdout;
+
+  char *entry_string;
+
+  if (IS_SCALAR(A_pID))
+  {
+     mats_ptr_t A_ptr = (mats_ptr_t)m_Rptr;
+     entry_string = sca_get_readable_approx_str(A_ptr->scalar_value);
+     fprintf(f,"%s\n", entry_string);
+     free(entry_string);
+     if (strcmp(filename,"stdout")) fclose(f);
+     return;
+  }
+
+  // get the matrix pointer from the packedID, and see if still in store 
+  matns_ptr_t A_ptr = (matns_ptr_t)m_Rptr;
+
   int i,j;
-  int row_level =  matrix_row_level(ptr_A);
-  int col_level =  matrix_col_level(ptr_A);
-  int row_dim = 1 << row_level;
-  int col_dim = 1 << col_level;
-  scalarType *entry;
+  int row_level =  A_ptr->row_level;
+  int col_level =  A_ptr->col_level;
+  unsigned row_dim = 1 << row_level;
+  unsigned col_dim = 1 << col_level;
 
   for(i = 0;i<row_dim;i++){
     for(j = 0;j<col_dim; j++){
-      entry = &matrix_trace(get_valMatPTR_from_matPTR_and_coords(i, j, ptr_A));
-      char *entry_string = sca_get_str(*entry);
+      mats_ptr_t e_ptr = get_scalarPTR_from_pID_and_coords(i, j, A_pID);
+      char *entry_string = sca_get_readable_approx_str(e_ptr->scalar_value);
       fprintf(f,"%s ", entry_string);
       free(entry_string);
     }
@@ -631,43 +770,52 @@ void write_naive_by_matPTR(mat_ptr_t ptr_A, char * filename)
   if (strcmp(filename,"stdout")) fclose(f);
 }
 
-// SOMEWHAT LESS NAIVE PRINTING ROUTINES
-// void write_matrix_nonzeros_by_matID(int64_t A_mID, char* filename)
-// void write_matrix_nonzeros_by_matPTR(mat_ptr_t ptr_A, char * filename)
+// SOMEWHAT LESS NAIVE PRINTING ROUTINE
+// void fprint_matrix_nonzeros(int64_t A_pID, char* filename)
 // * there is no limit to the number of nonzero values printed...
 
 /********************************************************************
-* (Python interface) write_matrix_nonzeros_by_matID            *
+* (Python interface) fprint_matrix_nonzeros            *
 ********************************************************************/
-void write_matrix_nonzeros_by_matID(int64_t A_mID, char * filename)
+void fprint_matrix_nonzeros(int64_t A_pID, char * filename)
 {
+  // The following checks to ensure that A_pID
+  // has valid record pointer (eg, not RECORD_PTR_INVALID)
+  record_ptr_t m_Rptr;
+  check_validity_one_input(A_pID, __func__, &m_Rptr);
+
+  if (IS_SCALAR(A_pID))
+  {
+     // get the matrix pointer from the matrixID, and see if still in store 
+     mats_ptr_t A_ptr = (mats_ptr_t)m_Rptr;
+
+     FILE *f = fopen(filename, "w");
+     if (!(A_ptr->iszero))
+     {
+         char *entry_string = sca_get_readable_approx_str(A_ptr->scalar_value);
+         fprintf(f, "%s\t(0,0)\n", entry_string);
+         free(entry_string);
+     }
+     fclose(f);
+     return;
+  }
+
   // get the matrix pointer from the matrixID, and see if still in store 
-  mat_ptr_t A_ptr = get_matPTR_from_matID(A_mID, "", __func__,0);
-  if (A_ptr == MATRIX_PTR_INVALID) { exit(1); }
+  matns_ptr_t A_ptr = (matns_ptr_t)m_Rptr;
 
-  write_matrix_nonzeros_by_matPTR(A_ptr, filename);
-
-}
-
-
-/********************************************************************
-*                write_matrix_nonzeros_by_matPTR               *
-********************************************************************/
-void write_matrix_nonzeros_by_matPTR(mat_ptr_t ptr_A, char * filename)
-{
   FILE *f = fopen(filename, "w");
-  mat_level_t row_level =  matrix_row_level(ptr_A);
-  mat_level_t col_level =  matrix_col_level(ptr_A);
-  int64_t row_dim = 1L << row_level;
-  int64_t col_dim = 1L << col_level;
-  scalarType *entry;
+  mat_level_t row_level =  A_ptr->row_level;
+  mat_level_t col_level =  A_ptr->col_level;
+  uint64_t row_dim = (uint64_t)1 << row_level;
+  uint64_t col_dim = (uint64_t)1 << col_level;
 
-  for(int64_t i = 0; i < row_dim; i++){
-    for(int64_t j = 0; j < col_dim; j++){
-      entry = &matrix_trace(get_valMatPTR_from_matPTR_and_coords(i, j, ptr_A));
-      if (0 == sca_eq(*entry, scalar0)){
-        char *entry_string = sca_get_str(*entry);
-        fprintf(f, "%s\t(%ld,%ld)\n", entry_string, i, j);
+  for(uint64_t i = 0; i < row_dim; i++){
+    for(uint64_t j = 0; j < col_dim; j++){
+      mats_ptr_t e_ptr = get_scalarPTR_from_pID_and_coords(i, j, A_pID);
+      if (!(e_ptr->iszero))
+      {
+        char *entry_string = sca_get_readable_approx_str(e_ptr->scalar_value);
+        fprintf(f, "%s\t(%" PRIu64 ",%" PRIu64 ")\n", entry_string, i, j);
         free(entry_string);
       }
     }
@@ -675,31 +823,33 @@ void write_matrix_nonzeros_by_matPTR(mat_ptr_t ptr_A, char * filename)
   fclose(f);
 }
 
+
 // A COMPARISON BETWEEN THE MATRICES STORED IN TWO COMPRESSED JSON FILES
 // This (apparently) is in io.c since data is read from files...
-// Since the routine calls read_larcMatrix_file_return_matPTR, it works with multiprecision
-// types and can be called from the python interface. It puts both matrices
+// The routine works with multiprecision types and can be called from the
+// python interface. It puts both matrices
 // into the matrix store, and returns 0 if the matrices are not equal or the
 // matrixID if they are equal.
-int64_t
-equal_matrices_in_larcMatrix_files(char *path1, char *path2)
+int64_t equal_matrices_in_larcMatrix_files(char *path1, char *path2)
 {
   if (!strcmp(path1,path2)) /* paths are equal */
     {
       fprintf(stderr,"Warning %s : %s fail: line %d, path1 and path2 are the same.\n",
               __FILE__, __func__, __LINE__);
     }
-  mat_ptr_t m1_ptr = read_larcMatrix_file_return_matPTR(path1);
-  mat_ptr_t m2_ptr = read_larcMatrix_file_return_matPTR(path2);
-  if ( matrix_is_invalid(m1_ptr) || matrix_is_invalid(m2_ptr) ) {
+  int64_t m1_pID = read_larcMatrixFile(path1);
+  int64_t m2_pID = read_larcMatrixFile(path2);
+  if (( m1_pID==MATRIX_ID_INVALID) || (m2_pID==MATRIX_ID_INVALID)) {
       fprintf(stderr,"Warning %s : %s fail: line %d, invalid matrix\n",
               __FILE__, __func__, __LINE__);
       return(0);
   }
-  int64_t m1_mID =  get_matID_from_matPTR(m1_ptr);
-  int64_t m2_mID =  get_matID_from_matPTR(m2_ptr);
-  if (m1_mID == m2_mID) {
-    return m1_mID;
+  if (m1_pID == m2_pID) {
+    // If packedID were zero, could not tell the values were equal. However,
+    // at initialization the first matrixID is assigned to 0, a scalar, and
+    // with the is_scalar bit set the assigned packedID will be nonzero,
+    // so packedID==0 cannot happen.
+    return m1_pID;
   }
   else return 0;
 }
@@ -707,177 +857,89 @@ equal_matrices_in_larcMatrix_files(char *path1, char *path2)
 // ROUTINES WHICH EXECUTE READING AND WRITING FROM/TO JSON COMPRESSED FORMAT
 // 
 // THE WRITING ROUTINES:
-// int write_larcMatrix_file_by_matID(int64_t m_mID, char *path)
-// int write_larcMatrix_file_by_matPTR(mat_ptr_t m_ptr, char *path)
-// static int recursive_write_larcMatrix_file_by_matPTR(
-//    mat_ptr_t m_ptr, FILE *f, char *output_flags,
-//    void (*func)(scalarType*, const scalarType))
-// static int write_infoStore_to_larcMatrix_file(mat_ptr_t m_ptr, FILE *f)
-// int write_and_alter_vals_larcMatrix_file(mat_ptr_t m_ptr, char *path,
-//      void (*func)(scalarType*, const scalarType))
-
-// The core routine is write_and_alter_vals_larcMatrix_file(),  which
-// does some testing, writes the json file header, calls
-// write_infoStore_to_larcMatrix_file() to write out any info_store information, then
-// calls the recursive routine recursive_write_larcMatrix_file_by_matPTR() to output the
-// data in the matrix. The matrixID values are output unchanged. Each scalar
-// value seen has func() applied to it, and the resulting scalarType value is
-// converted to a string before being output. Once that is completed, the file
-// footer is written and the file handle closed, and finally the function
-// returns to its calling routine.
-//
-// We have not written a matrixID version for this routine, though it would be
-// trivial, because it should always be called by some other C routine which
-// defines a value for the function pointer
-//    void *(func)(scalarType *a, const scalarType b)
-// and the calling routine would pass the pointer to the matrix rather than a
-// matrixID.
-//
-// func() is applied to every scalar (b) that is in the matrix before the
-// modified matrix is written. To put the unchanged scalar b in the location a,
-// the function we would pass is sca_set(), which does *a=b. This is hardcoded
-// into the "default" writing routines write_larcMatrix_file_by_matPTR() and its
-// *_matrixID version.
-
-int write_larcMatrix_file_by_matID(int64_t m_mID, char *path)
-{
-  // get the matrix pointer from the matrixID, and see if still in store 
-  mat_ptr_t m_ptr = get_matPTR_from_matID(m_mID, "", __func__,0);
-  if (m_ptr == MATRIX_PTR_INVALID) { exit(1); }
-
-  // calculate matrix pointer version of function
-  
-  return write_larcMatrix_file_by_matPTR(m_ptr, path);
-}
-
-int write_larcMatrix_file_by_matPTR(mat_ptr_t m_ptr, char *path)
-{
-    // the function sca_set as the last argument ensures the written data
-    // is the same as that in the matrixStore
-    return write_and_alter_vals_larcMatrix_file(m_ptr, path, sca_set);
-}
+// int fprint_larcMatrixFile(int64_t m_pID, char *path)
+// static void update_infoStore_automatic_entries(int64_t m_pID)
+// static int write_infoStore_to_larcMatrix_file(int64_t m_pID, FILE *f)
 
 /*!
  * \ingroup larc
- * \brief A worker routine for writing a json formatted compressed matrix recursively
- * \param m_ptr The pointer to the matrix to be written
- * \param f A file pointer
- * \param output_flags An array of flags used to track already-written matrixIDs
- * \param func A function that will be applied to each scalar before writing
- * \return 1 on success
+ * \brief Puts automatic entries into info store.
+ *
+ * The automatic entries are SCALARTYPE, REGIONTYPE, REGIONBITPARAM, and ZEROREGIONBITPARAM.
+ * \param m_pID The packedID of the matrix which will have its infoStore entries added or updated
  */
-static int
-recursive_write_larcMatrix_file_by_matPTR(mat_ptr_t m_ptr, FILE *f, char *output_flags, void (*func)(scalarType*, const scalarType))
+static void update_infoStore_automatic_entries(int64_t m_pID)
 {
-  if (matrix_is_invalid(m_ptr)) {
-    fprintf(stderr,"%s: invalid matrix pointer passed\n", __func__);
-    return -1;
-  }
+    char buf[256];
+    int err_flag;
 
-  /* output_flags keeps track of which matrixIDs have already appeared */
-  if (output_flags[get_matID_from_matPTR(m_ptr)] > 0)
-    return 1;
+    // write the scalar type to the InfoStore
+    snprintf(buf, sizeof(buf), get_string_scalarType());
 
-  output_flags[get_matID_from_matPTR(m_ptr)] = 1;
-  matrix_type_t mtype = matrix_type(m_ptr);
-
-  if (mtype == SCALAR)
-    {
-      // in COMPLEX case, write routine to output "a+I*b" as "a, b"
-      scalarType *val = &scratchVars.submit_to_store;
-      // the function func() is applied to the scalar value in m_ptr, and
-      // the result put into val; if the function is sca_set, the stored value
-      // is merely copied
-      func(val, matrix_trace(m_ptr));
-      char *val_string = sca_get_str(*val);
-      fprintf(f, "    \"%ld\":[%d, %d, \"%s\"],\n", get_matID_from_matPTR(m_ptr), matrix_row_level(m_ptr), 
-              matrix_col_level(m_ptr), val_string);
-      free(val_string);
+    err_flag =  info_set(SCALARTYPE, m_pID, buf);
+    if (err_flag) {
+        fprintf(stderr,"Error writing scalar type to info store in %s\n", __func__);
+        exit(1);
     }
-  else   // NONSCALAR
-    {
-      int ret;
-     
-      mat_ptr_t panel[4];
-      for (int i = 0; i < 4; ++i) {
-        panel[i] = matrix_sub(m_ptr,i);
-      }
 
-      // obtain the pointers for the matrices in the panel
-      ret = recursive_write_larcMatrix_file_by_matPTR(panel[0], f, output_flags, func);
-      if (ret < 0) return ret;
+    // write the region type to the InfoStore
+#ifdef MAR
+    snprintf(buf, sizeof(buf), "MAR");
+#else
+    snprintf(buf, sizeof(buf), "SPR");
+#endif  // #ifdef MAR
 
-      if (mtype!=COL_VECTOR) {
-        ret = recursive_write_larcMatrix_file_by_matPTR(panel[1], f, output_flags, func);
-        if (ret < 0) return ret;
-      }
-
-      if (mtype!=ROW_VECTOR) {
-        ret = recursive_write_larcMatrix_file_by_matPTR(panel[2], f, output_flags, func);
-        if (ret < 0) return ret;
-      }
-
-      if (mtype==MATRIX) {
-        ret = recursive_write_larcMatrix_file_by_matPTR(panel[3], f, output_flags, func);
-        if (ret < 0) return ret;
-      }
-
-      // print the panel, which contains matrixIDs for these matrices 
-      fprintf(f, "    \"%ld\":[%d, %d, %ld, ", get_matID_from_matPTR(m_ptr), 
-                matrix_row_level(m_ptr), matrix_col_level(m_ptr),
-	        get_matID_from_matPTR(panel[0]));
-
-      if (mtype!=COL_VECTOR) {
-                fprintf(f, "%ld, ", get_matID_from_matPTR(panel[1]));
-      }
-      else { fprintf(f, "-1, "); }
-
-      if (mtype!=ROW_VECTOR) {
-                fprintf(f, "%ld, ", get_matID_from_matPTR(panel[2]));
-      }
-      else { fprintf(f, "-1, "); }
-
-      if (mtype==MATRIX) {
-                fprintf(f, "%ld],\n", get_matID_from_matPTR(panel[3]));
-      }
-      else { fprintf(f, "-1],\n"); }
-
-      //fprintf(f, "    \"%ld\":[%d, %d, %ld, %ld, %ld, %ld],\n", get_matID_from_matPTR(m_ptr), 
-      //      matrix_row_level(m_ptr),matrix_col_level(m_ptr),
-      //      get_matID_from_matPTR(panel[0]),get_matID_from_matPTR(panel[1]),
-      //      get_matID_from_matPTR(panel[2]),get_matID_from_matPTR(panel[3]));
+    err_flag =  info_set(REGIONTYPE, m_pID, buf);
+    if (err_flag) {
+        fprintf(stderr,"Error writing region type to info store in %s\n", __func__);
+        exit(1);
     }
-  return 1;
-}
 
+    // write the region bit param to the InfoStore
+    snprintf(buf, sizeof(buf), "%d", get_regionbitparam());
 
-/* This function should retrieve all information out of the info_store
-   for the given matrix associated with m_ptr and write it to the
-   json file associated with the output file pointer f.
-*/
+    err_flag =  info_set(REGIONBITPARAM, m_pID, buf);
+    if (err_flag) {
+        fprintf(stderr,"Error writing region bit param to info store in %s\n", __func__);
+        exit(1);
+    }
+
+    // write the zero region bit param to the InfoStore
+    snprintf(buf, sizeof(buf), "%d", get_zeroregionbitparam());
+
+    err_flag =  info_set(ZEROREGIONBITPARAM, m_pID, buf);
+    if (err_flag) {
+        fprintf(stderr,"Error writing zero region bit param to info store in %s\n", __func__);
+        exit(1);
+    }
+} // end update_infoStore_automatic_entries
+
+/* This function should retrieve all information out of the InfoStore
+   for the given matrix associated with m_pID and write it to the
+   json file associated with the output file pointer f.  */
+
 /*!
  * \ingroup larc
- * \brief Writes all info_store information about a given matrix to a json file
- * \param m_ptr Pointer to the matrix to be stored in compressed json format
+ * \brief Writes all InfoStore information about a given matrix to a json file
+ * \param m_pID PackedID of the matrix to be stored in compressed json format
  * \param f File pointer for the json file where the metadata will be written
  * \return 1 on success
  */
-static int write_infoStore_to_larcMatrix_file(mat_ptr_t m_ptr, FILE *f) {
+static int write_infoStore_to_larcMatrix_file(int64_t m_pID, FILE *f)
+{
   int verbose = 0;
 
   if (!f)
     return -1;
-  if (matrix_is_invalid(m_ptr)) 
+  if (m_pID==MATRIX_ID_INVALID)
     return -1;
-
-  int64_t m_ID = get_matID_from_matPTR(m_ptr);
 
   enum info_types i;
   int was_info = 0;
   char* info_data;
   char* info_name;
   for (i=0;i<INVALID_INFO;++i) {
-    info_data = info_get(i,m_ID);
+    info_data = info_get(i,m_pID);
     if (verbose) printf("info_data is %s, info_enum is %d\n",info_data,i);
     // if info_data has an entry then the following test is true
     if (strcmp(info_data,"")) {
@@ -897,107 +959,317 @@ static int write_infoStore_to_larcMatrix_file(mat_ptr_t m_ptr, FILE *f) {
   return(0);
 }
 
-int write_and_alter_vals_larcMatrix_file(mat_ptr_t m_ptr, char *path,
-        void (*func)(scalarType*, const scalarType))
-{
-  /* output_flags keeps track of which matrixIDs have already appeared */
-
-  FILE *f = fopen(path, "w");
-  int ret;
-
-  if (!f)
-    {
-        fprintf(stderr,"in %s, could not open %s for writing\n",__func__,path);
-        return -1;
-    }
-  if (matrix_is_invalid(m_ptr)) 
-    {
-        fprintf(stderr,"in %s, passed matrix pointer is invalid\n",__func__);
-        return -1;
-    }
-  char *output_flags = calloc(num_matrices_created(), sizeof(char));
-  if (output_flags == NULL) {
-    ALLOCFAIL();
-  }
-
-  if (!output_flags) 
-    return -1;
-
-  printf("\nWriting %d,%d-level matrix with matrixID %" PRId64 " to %s\n", 
-	 matrix_row_level(m_ptr), matrix_col_level(m_ptr),
-         get_matID_from_matPTR(m_ptr), path);
-  // printf("      the matrix id is %lu, with level %d %d\n",id, matrix_row_level(m_ptr), matrix_col_level(m_ptr));
-
-  // fprintf(f, "{\n  \"matrixID_max\":%" PRIu64 ",\n  \"matid\":%" PRIu64 ",\n  \"table\":{\n", num_matrices_created(), get_matID_from_matPTR(m_ptr));
-
-
-  // json file contains: matriID_max, matid, optional info struct, table struct
-  fprintf(f, "{\n  \"matrixID_max\":%" PRIu64 ",\n  \"matid\":%" PRIu64 ",",
-	  num_matrices_created(), get_matID_from_matPTR(m_ptr));
-
-  // the info structure is printed when it contains information
-  ret = write_infoStore_to_larcMatrix_file(m_ptr, f);
-  if (ret != 0) {
-    fprintf(stderr,"WARNING in %s, function write_infoStore_to_larcMatrix_file failed\n",__func__);
-  }
-
-  // always print the matrix table recursively
-  fprintf(f, "\n  \"table\":{\n"); 
-  ret = recursive_write_larcMatrix_file_by_matPTR(m_ptr, f, output_flags, func);
-  free (output_flags);
-
-  // end the table structure and the json file
-  fprintf(f, "      \"end\":0 }\n}\n");
-  fclose(f);
-
-  return ret;
-}
 
 // THE READING ROUTINES:
-// int64_t read_larcMatrix_file_return_matID(char *path)
-// mat_ptr_t read_larcMatrix_file_return_matPTR(char *path)
-// mat_ptr_t read_and_alter_vals_larcMatrix_file_return_matPTR(
-//      char *path, void (*func)(scalarType*, const scalarType))
-// int64_t read_larcMatrix_file_legacy_return_matID(char *path)
-// mat_ptr_t read_larcMatrix_file_legacy_return_matPTR(char *path)
+// int64_t read_larcMatrixFile(char *path)
+// int64_t read_anyFormat_larcMatrixFile(char *path)
+// int64_t read_legacy_larcMatrixFile(char *path)
 //
-// Similar to but less complicated than the writing case. The core function is
-// read_and_alter_vals_larcMatrix_file_return_matPTR(). This function reads in the
-// string-formatted data from a compressed json matrix file, converts the string
-// to the appropriate scalarType, then applies func() to the data before the
-// value is put into the matrixStore. The core function is called by the
-// "default" reading functions read_larcMatrix_file_return_matPTR and its *_matrixID version
-// with the function func() hardcoded to be sca_set(), which does not change
-// the data.
+// Similar to but less complicated than the writing case. These functions read
+// string-formatted data from a compressed json matrix file, converts strings
+// to the appropriate scalarType, then puts the values into the matrixStore.
 //
-// There are also _legacy versions of the read function which will correctly
-// interpret old-style compressed json in which the data fields are C integers,
+// The default version of the read function, read_larcMatrixFile, assumes that
+// the format of the input file is line-by-line
+// equivalent to the fprint_larcMatrixFile() output format, whereas the
+// _anyFormat_ version only assumes that the input file is valid JSON and
+// contains the correct fields.
+//
+// The _legacy version of the read function will correctly interpret
+// old-style compressed json in which the data fields are C integers,
 // doubles or complex numbers rather than string representations of these
 // numbers. (The switch to strings was necessary to enable GMP multiprecision.)
 // For obvious reasons, there are no legacy writing routines.
 
-/* Python interface to return a matrixID after reading a json file */
-int64_t read_larcMatrix_file_return_matID(char *path)
+// Simple JSON reader, expects the file read to be in the format produced
+// by fprint_larcMatrixFile().
+int64_t read_larcMatrixFile(char *path)
 {
-  
-  mat_ptr_t m_ptr = read_larcMatrix_file_return_matPTR(path);
-  int64_t m_mID =  get_matID_from_matPTR(m_ptr);
-  return m_mID;
-  
+    int verbose = 0;
+    FILE *f = fopen(path, "r");
+    if (verbose) {
+        printf("VERBOSE: %s: path = %s\n",__func__, path);
+    }
+    if (NULL == f) {
+        fprintf(stderr,"%s: no file found at\n\t%s:\n\texiting\n", __func__, path);
+        exit(1);
+    }
+
+    // These are the fields we are looking for.
+    // const char *str_matmax = "\"matrixID_max\":";
+    // const char *str_matID = "\"matid\":";
+    // const char *str_info = "\"info\":";
+    // const char *str_table = "\"table\":";
+    // const char *str_end = "\"end\":";
+
+#if defined(IS_RATIONAL) || defined(USE_MPINTEGER)
+    char *linebuf, *val_str;
+#else
+    const int buffer_length = 4096;
+    char linebuf[buffer_length];
+    char val_str[1024];
+#endif
+    uint64_t max_matrixID;
+    uint64_t matid = 0;
+    int64_t *mapID = NULL;
+    long long int info_seek = -1;
+    int info_count = 0;
+    char string2compare[6];
+
+    // Here we loop over the input file line by line.
+    int state = 0;
+    long long int linenum = 0;
+    while (1) {
+#if defined(IS_RATIONAL) || defined(USE_MPINTEGER)
+        if (-1 == fscanf(f, " %m[^\n] ", &linebuf))
+#else
+        if (NULL == fgets(linebuf, buffer_length, f))
+#endif
+        {
+              fprintf(stderr,"%s: finished with EOF\n",__func__);
+              break;
+        }
+        ++linenum;
+        if (verbose) printf("linebuf = %s\n",linebuf);
+        if (verbose) printf("linenum = %lld\n",linenum);
+        if (1 == linenum) {
+            // The first line of the file just contains an open brace.
+        } else if (2 == linenum) {
+            // The second line of the file contains the max matrixID.
+            if (1==sscanf(linebuf, " \" matrixID_max \" : %" PRIu64 ,
+			&max_matrixID) ) {
+                if (verbose) {
+                    printf("VERBOSE: %s: max matrixID = %" PRIu64 " on line %lld\n", __func__, max_matrixID, linenum);
+                }
+                // check that we can allocate an array this large
+                // (i.e., total number of bytes does not exceed SIZE_MAX)
+                uint64_t size_check = SIZE_MAX/(max_matrixID + 1)/sizeof(int64_t);
+                if (size_check==0) {
+                    fprintf(stderr,"Error is %s: matrixID_max too large - try\n", __func__);
+                    fprintf(stderr,"renumbering the matrix_IDs in %s\n", path);
+                    fprintf(stderr,"to reduce this value to something more reasonable.\n");
+                    exit(1);
+                }
+                // the mapID array is indexed by the matrixIDs found in the input file
+                // but contains the packedIDs assigned when added to the MatrixStore
+                mapID = (int64_t *) calloc(max_matrixID+1, sizeof(int64_t));
+                if (mapID == NULL){
+                    fprintf(stderr,"Error in %s: failed to allocate array.\n", __func__);
+                    exit(1);
+                }
+            } else {
+                fprintf(stderr,"%s(%d): Error on line %lld of %s.\nexiting\n", __func__, __LINE__, linenum, path);
+                exit(1);
+            }
+        } else if (3 == linenum) {
+            // The third line of the file contains the matID.
+            if (1==sscanf(linebuf, " \" matid \" : %" PRIu64 , &matid) ) {
+                if (verbose) {
+                    printf("VERBOSE: %s: matid = %" PRIu64 " on line %lld\n", __func__, matid, linenum);
+                 }
+            } else {
+                fprintf(stderr,"%s(%d): Error on line %lld of %s.\nexiting\n", __func__, __LINE__, linenum, path);
+                exit(1);
+            }
+        } else if (4 == linenum) {
+            // The fourth line of the file is either "info" or "table".
+            if (1!=sscanf(linebuf, " \" %5[a-z] \" : \{", string2compare)) {
+                fprintf(stderr,"%s(%d): Error on line %lld of %s.\nexiting\n", __func__, __LINE__, linenum, path);
+                exit(1);
+            }
+	    if (!strcmp(string2compare,"info")) {
+                state = 1;  // for "info"
+                info_seek = ftell(f);
+                if (verbose) {
+                    printf("VERBOSE: %s: Found \"info\" on line %lld\n", __func__, linenum);
+		    printf("\tinfo_seek set to %lld, state to 1\n", info_seek);
+                }
+            } else if (!strcmp(string2compare,"table")) {
+                state = 3;  // for "table"
+                if (verbose) {
+                    printf("VERBOSE: %s: Found \"table\" on line %lld\n", __func__, linenum);
+                }
+            }
+        } else if (1 == state) {
+            // This line is an entry under "info".
+            sscanf(linebuf, " \" %5[a-z] \"",string2compare);
+            if (!strcmp(string2compare,"end")) {
+                state = 2;  // next line must be "table"
+                if (verbose) {
+                    printf("VERBOSE: reached end of info, state = 2\n");
+                }
+            } else {
+                // Skip over "info" entries for now.  We will process them later.
+                if (verbose) printf("skipping %s\n",linebuf);
+                ++info_count;
+            }
+        } else if (2 == state) {
+            // line is just after the "info" section, so it must be "table"
+            sscanf(linebuf, " \" %5[a-z] \" ",string2compare);
+            if (!strcmp(string2compare,"table")) {
+                state = 3;
+                if (verbose) {
+                    printf("VERBOSE: %s: Found \"table\" on line %lld\n", __func__, linenum);
+		    printf("state now 3\n");
+                }
+            } else {
+                fprintf(stderr,"%s(%d): Error on line %lld of %s.\nexiting\n", __func__, __LINE__, linenum, path);
+                exit(1);
+            }
+        } else if (3 == state) {
+            // This line is an entry under "table".
+            sscanf(linebuf, " \" %5[a-z] \" ",string2compare);
+            if (!strcmp(string2compare,"end")) {
+                state = 4; // all subsequent lines ignored
+            } else {
+                // Scan the matrix index and the row and column levels.
+                uint64_t m_index;
+                int row_level, col_level;
+                int rv = sscanf(linebuf, " \" %" SCNu64 " \" : [ %d, %d,",
+                                &m_index, &row_level, &col_level);
+                if (3 != rv) {
+                    fprintf(stderr,"%s(%d): Error on line %lld of %s.\nexiting\n",
+                                   __func__, __LINE__, linenum, path);
+                    exit(1);
+                }
+
+                if ((0 == row_level) && (0 == col_level)) {
+                    // Scalar case.  Only the scalar string should be remaining.
+                    int rv = sscanf(linebuf,
+#if defined(IS_RATIONAL) || defined(USE_MPINTEGER)
+		" \" %*u \" : [ %*d, %*d, \" %m[^]\"] \" ]", &val_str
+#else
+		" \" %*u \" : [ %*d, %*d, \" %1023[^]\"] \" ]", val_str
+#endif
+                );
+		    if (rv != 1) {
+                        fprintf(stderr,"%s(%d): Error on line %lld of %s.\nexiting\n",
+                                       __func__, __LINE__, linenum, path);
+                        exit(1);
+                    }
+                    mapID[m_index] = get_valID_from_valString(val_str);
+                    if (verbose) {
+                        printf("VERBOSE: %s: Scalar m_index = %" PRIu64 " for \"%s\""
+                               " maps to %" PRId64 " on line %lld\n",
+                               __func__, m_index, val_str, mapID[m_index], linenum);
+                    } // end verbose
+#if defined(IS_RATIONAL) || defined(USE_MPINTEGER)
+                    free(val_str);
+#endif
+                } else {
+                    // Non-scalar case.  The 4 panel indices should be remaining.
+                    int64_t panel_index[4];
+                    int rv = sscanf(linebuf,
+" \" %*u \" : [ %*d, %*d, %" SCNd64 ", %" SCNd64 ", %" SCNd64 ", %" SCNd64 " ]",
+		panel_index, panel_index+1, panel_index+2, panel_index+3);
+                    if (4 != rv) {
+                        fprintf(stderr,"%s(%d): Error on line %lld of %s.\nexiting\n",
+                                       __func__, __LINE__, linenum, path);
+                        exit(1);
+                    }
+                    int64_t content_pID[4];
+                    for (int k = 0; k < 4; ++k) {
+                       // The matrix ID -1 is used whenever we have no matrix,
+                       // e.g. in row and col place keepers
+                       if (-1 == panel_index[k]) {
+                           content_pID[k] = MATRIX_ID_INVALID;
+                       }
+                       else {
+                         content_pID[k] = mapID[panel_index[k]];
+                       }
+                    }
+                    mapID[m_index] = get_pID_from_array_of_four_sub_pIDs(
+                         content_pID, row_level, col_level);
+                    if (verbose) {
+                        printf("VERBOSE: %s: Non-scalar m_index = %" PRIu64
+                               " for row_level = %d, col_level = %d,"
+                               " panels [%" PRId64 ", %" PRId64 ", %" PRId64 ", %" PRId64 "]"
+                               " maps to %" PRId64 " on line %lld\n",
+                               __func__, m_index, row_level, col_level,
+                               panel_index[0], panel_index[1], panel_index[2], panel_index[3],
+                               mapID[m_index], linenum);
+                    }
+                } // end of non-scalar case
+            } // end of "table" entry processing
+        } // end of state 3 section 
+#if defined(IS_RATIONAL) || defined(USE_MPINTEGER)
+        free(linebuf);
+#endif
+    }  // end of while loop over lines in input file
+
+    int64_t packedID =  mapID[matid];
+    matns_ptr_t ret = (matns_ptr_t) get_recordPTR_from_pID(packedID,"",__func__,0);
+    printf("\nRead %d,%d-level matrix from json file %s\n",
+           ret->row_level, ret->col_level, path);
+    printf ("  stored matrix now has address %p", ret);
+    printf ("  and packedID %" PRId64 "\n", packedID);
+    free(mapID);
+
+    const char *scalar_type_string = get_string_scalarType();
+
+    if (-1 != info_seek) {
+        if (verbose) {
+            printf("VERBOSE: %s: Starting \"info\" entry processing for %d entries.\n",
+                   __func__, info_count);
+        }
+        int rv = fseek(f, info_seek, SEEK_SET);
+        if (rv < 0) {
+            fprintf(stderr,"%s(%d): Error from file seek of %s.\nexiting\n",
+                           __func__, __LINE__, path);
+            exit(1);
+        }
+        for (int j = 0; j < info_count; ++j) {
+#if defined(IS_RATIONAL) || defined(USE_MPINTEGER)
+            if (1 != fscanf(f, " %m[^\n] ", &linebuf))
+#else
+            if (NULL == fgets(linebuf, buffer_length, f))
+#endif
+            {
+                fprintf(stderr,"%s(%d): Error re-reading \"info\" entry #%d of %s.\nexiting\n",
+                               __func__, __LINE__, j+1, path);
+                exit(1);
+            }
+            if (verbose) {
+                printf("VERBOSE: %s: Processing \"info\" entry #%d: %s",
+                       __func__, j+1, linebuf);
+            }
+
+            char info_name[256];
+            char info_data[4096];
+	    sscanf(linebuf, " \" %255[^\"] \" : \" %4095[^\"] \",",
+		info_name, info_data);
+            info_type_t info_type = get_info_type_from_string_name(info_name);
+            if (SCALARTYPE == info_type) {
+                if (0 != strcmp(info_data, scalar_type_string)) {
+                    fprintf(stderr,"Warning %s : %s : line %d, "
+                            "Scalar type is different than when larcMatrix file was written.\n",
+                            __FILE__, __func__, __LINE__);
+                    fprintf(stderr,"Scalar type of larcMatrix file was: %s.\n", info_data);
+                    fprintf(stderr,"Current scalar type is: %s.\n", scalar_type_string);
+                }
+            }
+            int fail = info_set(info_type, packedID, info_data);
+            if (fail) {
+                fprintf(stderr,"panic in %s\n",__func__);
+                exit(1);
+            }
+
+            if (verbose) {
+                printf("VERBOSE: %s: For packedID %" PRId64 ", added key"
+                       " %s to InfoStore with value \"%s\"\n",
+                       __func__, packedID, info_name, info_data);
+            }
+#if defined(IS_RATIONAL) || defined(USE_MPINTEGER)
+            free(linebuf);
+#endif
+        }  // end of loop through "info" entries
+    }  // end of test for "info" section
+
+    fclose(f);
+    return packedID;
 }
 
-mat_ptr_t read_larcMatrix_file_return_matPTR(char *path)
-{
-// This function is the default version for reading in json formatted
-// matrix data, converting the strings in the json to the correct scalarType.
-// It makes use of the more general function which allows the user to
-// specify a function which is applied to each scalar as it is read in. The
-// function sca_set(scalarType *a, const scalarType b) performs *a=b and thus
-// leaves the input data unchanged.
-  return read_and_alter_vals_larcMatrix_file_return_matPTR(path, sca_set);
-}
-
-mat_ptr_t read_and_alter_vals_larcMatrix_file_return_matPTR(char *path, void (*func)(scalarType*, const scalarType))
+int64_t read_anyFormat_larcMatrixFile(char *path)
 {
 // This function is used to read a compressed matrix stored in our json format
 // into the matrix store, optionally changing it to a different matrix by 
@@ -1025,7 +1297,7 @@ mat_ptr_t read_and_alter_vals_larcMatrix_file_return_matPTR(char *path, void (*f
 
   // check that we can allocate an array this large
   // (i.e., total number of bytes does not exceed SIZE_MAX)
-  i = SIZE_MAX/(max_matrixID + 1)/sizeof(mat_ptr_t);
+  i = SIZE_MAX/(max_matrixID + 1)/sizeof(int64_t);
   if (i==0) {
       fprintf(stderr,"Error is %s: matrixID_max too large - try\n", __func__);
       fprintf(stderr,"renumbering the matrix_IDs in %s\n", path);
@@ -1033,8 +1305,10 @@ mat_ptr_t read_and_alter_vals_larcMatrix_file_return_matPTR(char *path, void (*f
       exit(1);
   }
 
-  mat_ptr_t *map = calloc(max_matrixID+1, sizeof(mat_ptr_t));
-  if (!map){
+  // the mapID array is indexed by the matrixIDs found in the input file
+  // but contains the packedIDs assigned when added to the MatrixStore
+  int64_t *mapID = calloc(max_matrixID+1, sizeof(int64_t));
+  if (mapID == NULL){
     fprintf(stderr,"Error in %s: failed to allocate array.\n", __func__);
     exit(1);
   }
@@ -1048,6 +1322,10 @@ mat_ptr_t read_and_alter_vals_larcMatrix_file_return_matPTR(char *path, void (*f
       json_t *p = j_key_index(t, i);
       // index == current matrixID
       int64_t index = (int64_t) atoll(p->name); // maybe atol suffices? 
+//      if (index>=max_matrixID)
+//      {
+//         fprintf(stderr,"index > max_matrixID! exiting\n"); exit(1);
+//      }
       if (verbose) {printf("For i=%"PRId64", and index=%"PRId64"\n",i,index);}
       if (j_is_array(p))
 	{
@@ -1064,25 +1342,15 @@ mat_ptr_t read_and_alter_vals_larcMatrix_file_return_matPTR(char *path, void (*f
                  fprintf(stderr,"ERROR in %s:\nExpected scalar values to be given as strings.\nIf LARCMatrix file is in 'legacy' format, use utils/canonical_format_json.py\nto convert to LARCMatrix format with scalars saved as strings.\n", __func__);
                     exit(1);
                 }
-                scalarType *mat_val = &scratchVars.submit_to_store;
-                const char *val_str = j_get_string(j_array_index(p,2));
-                sca_set_str(mat_val, val_str);
-// This is the sole place in this routine where func() is called. If the line
-// is omitted or func is set to sca_set, then the scalar that was read in is
-// left unchanged.
-                func(mat_val, *mat_val);
                 if (row_level || col_level) {
 		  fprintf(stderr,"error in %s:\n\texpected ", __func__ );
                   fprintf(stderr,"scalar, but levels greater than zero!\n");
                 }
-		map[index] = get_valMatPTR_from_val(*mat_val);
+                const char *val_str = j_get_string(j_array_index(p,2));
+                mapID[index] = get_valID_from_valString((char *)val_str); 
                 if (verbose) {
-		  // printf("%"PRId64" %zd %" PRId64 " %d %d %g\n", index, map[index], 
-                  char *mat_val_string = sca_get_str(*mat_val);
-		  printf("%"PRId64" %p %" PRId64 " %d %d %s\n", index, map[index], 
-			 get_matID_from_matPTR((map[index])),
-			 row_level, col_level, mat_val_string);
-                  free(mat_val_string);
+		  printf("%"PRId64" %" PRId64 " %d %d %s\n", index,
+			 mapID[index], row_level, col_level, val_str);
 		}
 	      }
               break;
@@ -1092,29 +1360,27 @@ mat_ptr_t read_and_alter_vals_larcMatrix_file_return_matPTR(char *path, void (*f
 		int row_level = j_get_num64(j_array_index(p, 0));
 		int col_level = j_get_num64(j_array_index(p, 1));
                 if (verbose) {printf("  levels are %d %d \n",row_level,col_level);}
-		mat_ptr_t content[4];
+                int64_t content_pID[4];
                 int64_t temp;
                 for (int k=0; k< 4; ++k) {
 		   temp = j_get_num64(j_array_index(p, k+2));
-                   if (verbose) {printf("temp for k = %d is %ld \n",k,temp);}
+                   if (verbose) {printf("temp for k = %d is %" PRId64 " \n",k,temp);}
                    // The matrix ID -1 is used whenever we have no matrix, 
                    // e.g. in row and col place keepers
-                   if (temp == -1) { content[k] = MATRIX_PTR_INVALID;}
+                   if (temp == -1) {
+                       content_pID[k] = MATRIX_ID_INVALID;
+                   }
                    else {
-                     content[k] = map[temp];
+                     content_pID[k] = mapID[temp];
 		   }
 		}
-		/* content[0] = map[j_get_num64(j_array_index(p, 2))]; */
-		/* content[1] = map[j_get_num64(j_array_index(p, 3))]; */
-		/* content[2] = map[j_get_num64(j_array_index(p, 4))]; */
-		/* content[3] = map[j_get_num64(j_array_index(p, 5))]; */
-		map[index] = get_matPTR_from_array_of_four_subMatPTRs(content,row_level,col_level);
+                mapID[index] = get_pID_from_array_of_four_sub_pIDs(
+                     content_pID, row_level, col_level);
                 if (verbose){
-		  printf("ind %" PRId64 " map %p mID %" PRId64 " (%d,%d)",
-                        index, map[index], get_matID_from_matPTR(map[index]), 
-			 row_level, col_level);
-		  printf(" [%p %p %p %p]\n", 
-                        content[0], content[1], content[2], content[3]);
+		  printf("ind %" PRId64 " mID %" PRId64 " (%d,%d)",
+                        index, mapID[index], row_level, col_level);
+		  printf(" [%ld %ld %ld %ld]\n", content_pID[0],
+                        content_pID[1], content_pID[2], content_pID[3]);
 		}
 	      }
 	      break; 
@@ -1129,13 +1395,15 @@ mat_ptr_t read_and_alter_vals_larcMatrix_file_return_matPTR(char *path, void (*f
 	}
     }
 
-  mat_ptr_t ret = map[j_lookup_num64(j, "matid")];
-  int64_t matid = get_matID_from_matPTR(ret);
+  int64_t packedID =  mapID[j_lookup_num64(j, "matid")];
+  matns_ptr_t ret = (matns_ptr_t)get_recordPTR_from_pID(packedID,"",__func__,0);
   printf("\nRead %d,%d-level matrix from json file %s\n", 
-	 matrix_row_level(ret), matrix_col_level(ret), path);
+	 ret->row_level, ret->col_level, path);
   printf ("  stored matrix now has address %p", ret);
-  printf ("  and matrixID %" PRId64 "\n", matid);
-  free(map);
+  printf ("  and packedID %" PRId64 "\n", packedID);
+  free(mapID);
+
+  const char *scalar_type_string = get_string_scalarType();
 
   if (j_key_exists(j, "info")) {
     if (verbose) printf("Found info key in %s\n", __func__);
@@ -1151,11 +1419,18 @@ mat_ptr_t read_and_alter_vals_larcMatrix_file_return_matPTR(char *path, void (*f
 	const char *info_data = j_get_string(p);
 	if (verbose) {printf("For i=%"PRId64", and key=%s\n", i, info_name);}
 	info_type_t info_type = get_info_type_from_string_name((char *) info_name);
-	
-	int fail =  info_set(info_type, matid, info_data);
+        if (SCALARTYPE == info_type) {
+          if (strcmp(info_data, scalar_type_string) != 0) {
+            fprintf(stderr,"Warning %s : %s : line %d, Scalar type is different than when larcMatrix file was written.\n",
+                    __FILE__, __func__, __LINE__);
+            fprintf(stderr,"Scalar type of larcMatrix file was: %s.\n", info_data);
+            fprintf(stderr,"Current scalar type is: %s.\n", scalar_type_string);
+          }
+        }
+	int fail =  info_set(info_type, packedID, info_data);
 	if (fail) {fprintf(stderr,"panic in %s\n",__func__); exit(1);}
 	if (verbose) {
-	  printf("Added info field %s to info_store\n", info_name);
+	  printf("Added info field %s to InfoStore\n", info_name);
 	  printf("  with value %s\n", info_data);
 	}
       }
@@ -1164,30 +1439,19 @@ mat_ptr_t read_and_alter_vals_larcMatrix_file_return_matPTR(char *path, void (*f
   fclose(f);
   j_set_null(j); free(j);
 
-  return ret;
+  return packedID;
 }
 
 // This routine is called by canonical_format_json.py when the python routine
 // is used to convert old-style json compressed matrices (with standard C data
 // types) into new-style json compressed matrices (with scalars expressed as
 // strings)
-int64_t read_larcMatrix_file_legacy_return_matID(char *path)
+int64_t read_legacy_larcMatrixFile(char *path)
 {
   
-  mat_ptr_t m_ptr = read_larcMatrix_file_legacy_return_matPTR(path);
-  int64_t m_mID =  get_matID_from_matPTR(m_ptr);
-  return m_mID;
-  
-}
-
-// At this point, this routine should only be called by
-// read_larcMatrix_file_legacy_return_matID(), since it assumes the old style
-// json compressed matrices and cannot handle multiprecision scalarTypes. 
-mat_ptr_t read_larcMatrix_file_legacy_return_matPTR(char *path)
-{
-
-#if defined(USE_MPINTEGER) || defined(USE_MPRATIONAL) || defined(USE_MPRATCOMPLEX) || defined(USE_MPREAL) || defined(USE_MPCOMPLEX)
-  // exit program if LARC is compiled for multiprecision types
+#if defined(IS_MP) || defined(IS_BOUNDING)
+  // exit program if LARC is compiled for any type which is not a standard C
+  // type (multiprecision types, bounding types)
   fprintf(stderr,"ERROR in %s: MP types have no legacy json format.\n", __func__);
   exit(1);
 #endif
@@ -1213,7 +1477,7 @@ mat_ptr_t read_larcMatrix_file_legacy_return_matPTR(char *path)
 
   // check that we can allocate an array this large
   // (i.e., total number of bytes does not exceed SIZE_MAX)
-  i = SIZE_MAX/(max_matrixID + 1)/sizeof(mat_ptr_t);
+  i = SIZE_MAX/(max_matrixID + 1)/sizeof(int64_t);
   if (i==0) {
       fprintf(stderr,"Error is %s: matrixID_max too large - try\n", __func__);
       fprintf(stderr,"renumbering the matrix_IDs in %s\n", path);
@@ -1221,8 +1485,10 @@ mat_ptr_t read_larcMatrix_file_legacy_return_matPTR(char *path)
       exit(1);
   }
 
-  mat_ptr_t *map = calloc(max_matrixID+1, sizeof(mat_ptr_t));
-  if (!map){
+  // the mapID array is indexed by the matrixIDs found in the input file
+  // but contains the packedIDs assigned when added to the MatrixStore
+  int64_t *mapID = calloc(max_matrixID + 1, sizeof(int64_t));
+  if (mapID == NULL){
     fprintf(stderr,"Error in %s: failed to allocate array.\n", __func__);
     exit(1);
   }
@@ -1238,121 +1504,140 @@ mat_ptr_t read_larcMatrix_file_legacy_return_matPTR(char *path)
       int64_t index = (int64_t) atoll(p->name); // maybe atol suffices? 
       if (verbose) {printf("For i=%"PRId64", and index=%"PRId64"\n",i,index);}
       if (j_is_array(p))
-	{
-	  int len1 = j_array_get_length(p);
+        {
+          int len1 = j_array_get_length(p);
           if (verbose) {printf("The length of this line is %d\n",len1);}
-	  switch(len1)
-	    {
+          switch(len1)
+            {
 #ifdef USE_COMPLEX
-	    case 4:			/* expect a scalar link */
-	      {
+            case 4:                        /* expect a scalar link */
+              {
                 if (verbose) {printf("In complex scalar case \n");}
-		int row_level = j_get_num64(j_array_index(p, 0));
-		int col_level = j_get_num64(j_array_index(p, 1));
-		// double complex_val[2];
-		// complex_val[0] = j_get_double(j_array_index(p,2));
-		// complex_val[1] = j_get_double(j_array_index(p,3));
+                int row_level = j_get_num64(j_array_index(p, 0));
+                int col_level = j_get_num64(j_array_index(p, 1));
+                // double complex_val[2];
+                // complex_val[0] = j_get_double(j_array_index(p,2));
+                // complex_val[1] = j_get_double(j_array_index(p,3));
                 // scalarType val = complex_val[0]+I*complex_val[1];
                 scalarType val;
                 sca_init(&val);
                 val =  j_get_double(j_array_index(p,2)) +
-		        I*j_get_double(j_array_index(p,3));
+                        I*j_get_double(j_array_index(p,3));
                 if (row_level || col_level) {
                         fprintf(stderr,"error in %s:\n\texpected complex ", __func__ );
                         fprintf(stderr,"scalar, but levels greater than zero!\n");
                 }
-		map[index] = get_valMatPTR_from_val(val);
+                mats_ptr_t s_ptr = get_scalarPTR_for_scalarVal(val);
+                mapID[index] = s_ptr->packedID;
                 if (verbose) {
-		  printf("%"PRId64" %p %" PRId64 " %d %d %Lg+%Lgi\n", index, map[index], 
-			 get_matID_from_matPTR((map[index])),
-			 row_level, col_level, creall(val), cimagl(val));
-		}
+                  printf("%"PRId64" %p %" PRId64 " 0 0 %Lg+%Lgi\n", index,
+                         s_ptr, mapID[index], creall(val), cimagl(val));
+                }
                 sca_clear(&val);
-	      }
-	      break;
+              }
+              break;
 #endif
 #ifdef USE_REAL
-	    case 3:			/* expect a scalar link */
-	      {
+            case 3:                        /* expect a scalar link */
+              {
                 if (verbose) {printf("In real scalar case \n");}
-		int row_level = j_get_num64(j_array_index(p, 0));
-		int col_level = j_get_num64(j_array_index(p, 1));
-		scalarType mat_val;
+                int row_level = j_get_num64(j_array_index(p, 0));
+                int col_level = j_get_num64(j_array_index(p, 1));
+                scalarType mat_val;
                 sca_init(&mat_val);
                 mat_val = j_get_double(j_array_index(p,2));
                 if (row_level || col_level) {
                         fprintf(stderr,"error in %s:\n\texpected real ", __func__ );
                         fprintf(stderr,"scalar, but levels greater than zero!\n");
                 }
-		map[index] = get_valMatPTR_from_val(mat_val);
+                mats_ptr_t s_ptr = get_scalarPTR_for_scalarVal(mat_val);
+                mapID[index] = s_ptr->packedID;
                 if (verbose) {
-		  // printf("%"PRId64" %zd %" PRId64 " %d %d %Lg\n", index, map[index], 
-		  printf("%"PRId64" %p %" PRId64 " %d %d %Lg\n", index, map[index], 
-			 get_matID_from_matPTR((map[index])),
-			 row_level, col_level, mat_val);
-		}
+                  printf("%"PRId64" %p %" PRId64 " 0 0 %Lg\n", index, 
+                         s_ptr, mapID[index], mat_val);
+                }
                 sca_clear(&mat_val);
-	      }
+              }
               break;
 #endif
 #ifdef USE_INTEGER
-	    case 3:			/* expect a scalar link */
-	      {
+            case 3:                        /* expect a scalar link */
+              {
                 if (verbose) {printf("In integer scalar case \n");}
-		int row_level = j_get_num64(j_array_index(p, 0));
-		int col_level = j_get_num64(j_array_index(p, 1));
-		scalarType mat_val;
+                int row_level = j_get_num64(j_array_index(p, 0));
+                int col_level = j_get_num64(j_array_index(p, 1));
+                scalarType mat_val;
                 sca_init(&mat_val);
                 mat_val = j_get_num64(j_array_index(p,2));
                 if (row_level || col_level) {
                         fprintf(stderr,"error in %s:\n\texpected integer ", __func__ );
                         fprintf(stderr,"scalar, but levels greater than zero!\n");
                 }
-		map[index] = get_valMatPTR_from_val(mat_val);
+                mats_ptr_t s_ptr = get_scalarPTR_for_scalarVal(mat_val);
+                mapID[index] = s_ptr->packedID;
                 if (verbose) {
-		  printf("%"PRId64" %p %" PRId64 " %d %d %ld\n", index, map[index], 
-			 get_matID_from_matPTR(map[index]),
-			 row_level, col_level, mat_val);
-		}
+                  printf("%"PRId64" %p %" PRId64 " 0 0 %ld\n", index, 
+                         s_ptr, mapID[index], mat_val);
+                }
                 sca_clear(&mat_val);
-	      }
+              }
               break;
 #endif
-	      
-	    case 6:			/* expect a 4-tuple */
-	      {
+#ifdef USE_BOOLEAN
+            case 3:                        /* expect a scalar link */
+              {
+                if (verbose) {printf("In boolean scalar case \n");}
+                int row_level = j_get_num64(j_array_index(p, 0));
+                int col_level = j_get_num64(j_array_index(p, 1));
+                scalarType mat_val;
+                sca_init(&mat_val);
+                mat_val = j_get_num64(j_array_index(p,2));
+                if (row_level || col_level) {
+                        fprintf(stderr,"error in %s:\n\texpected boolean ", __func__ );
+                        fprintf(stderr,"scalar, but levels greater than zero!\n");
+                }
+                mats_ptr_t s_ptr = get_scalarPTR_for_scalarVal(mat_val);
+                mapID[index] = s_ptr->packedID;
+                if (verbose) {
+                  printf("%" PRId64 " %p %" PRId64 " 0 0 %ld\n", index, 
+                         s_ptr, mapID[index], mat_val);
+                }
+                sca_clear(&mat_val);
+              }
+              break;
+#endif
+              
+            case 6:                        /* expect a 4-tuple */
+              {
                 if (verbose) {printf("In non scalar case \n");}
-		int row_level = j_get_num64(j_array_index(p, 0));
-		int col_level = j_get_num64(j_array_index(p, 1));
+                int row_level = j_get_num64(j_array_index(p, 0));
+                int col_level = j_get_num64(j_array_index(p, 1));
                 if (verbose) {printf("  levels are %d %d \n",row_level,col_level);}
-		mat_ptr_t content[4];
+                int64_t content_pID[4];
                 int64_t temp;
                 for (int k=0; k< 4; ++k) {
-		   temp = j_get_num64(j_array_index(p, k+2));
-                   if (verbose) {printf("temp for k = %d is %ld \n",k,temp);}
+                   temp = j_get_num64(j_array_index(p, k+2));
+                   if (verbose) {printf("temp for k = %d is %" PRId64 " \n",k,temp);}
                    // The matrix ID -1 is used whenever we have no matrix, 
                    // e.g. in row and col place keepers
-                   if (temp == -1) { content[k] = MATRIX_PTR_INVALID;}
+                   if (temp == -1) { content_pID[k] = MATRIX_ID_INVALID;}
                    else {
-                     content[k] = map[temp];
-		   }
-		}
-		/* content[0] = map[j_get_num64(j_array_index(p, 2))]; */
-		/* content[1] = map[j_get_num64(j_array_index(p, 3))]; */
-		/* content[2] = map[j_get_num64(j_array_index(p, 4))]; */
-		/* content[3] = map[j_get_num64(j_array_index(p, 5))]; */
-		map[index] = get_matPTR_from_array_of_four_subMatPTRs(content,row_level,col_level);
+                     content_pID[k] = mapID[temp];
+                   }
+                }
+                mapID[index] = get_pID_from_array_of_four_sub_pIDs(
+                    content_pID, row_level,col_level);
                 if (verbose){
-		  printf("ind %" PRId64 " map %p mID %" PRId64 " (%d,%d)",
-                        index, map[index], get_matID_from_matPTR(map[index]), 
-			 row_level, col_level);
-		  printf(" [%p %p %p %p]\n", 
-                        content[0], content[1], content[2], content[3]);
-		}
-	      }
-	      break; 
-	      
-	    default:
+                  printf("ind %" PRId64 " mID %" PRId64 " (%d,%d)",
+                        index, mapID[index], row_level, col_level);
+                  printf(" [%" PRId64 " %" PRId64 " %" PRId64 " %" PRId64 "]\n",
+                        content_pID[0], content_pID[1], content_pID[2],
+                        content_pID[3]);
+                }
+              }
+              break; 
+              
+            default:
               fprintf(stderr,"Error in %s(%s): unexpected number of entries per line\n",
                 __func__, path);
 #ifdef USE_COMPLEX
@@ -1361,18 +1646,34 @@ mat_ptr_t read_larcMatrix_file_legacy_return_matPTR(char *path)
               fprintf(stderr,"In real or integer mode expected num entries to be 3 or 6, but had %d entries\n",len1);
 #endif
               exit(1);
-	      break;
-	    }
-	}
+              break;
+            }
+        }
     }
 
-  mat_ptr_t ret = map[j_lookup_num64(j, "matid")];
-  int64_t matid = get_matID_from_matPTR(ret);
-  printf("\nRead %d,%d-level matrix from json file %s\n", 
-	 matrix_row_level(ret), matrix_col_level(ret), path);
-  printf ("  stored matrix now has address %p", ret);
-  printf ("  and matrixID %" PRId64 "\n", matid);
-  free(map);
+  int64_t packedID = mapID[j_lookup_num64(j, "matid")];
+  free(mapID);
+
+  if (packedID == MATRIX_ID_INVALID)
+  {
+    fprintf(stderr,"in %s, input packedID is invalid\n",__func__);
+    exit(0);
+  }
+
+  if (IS_SCALAR(packedID))
+  {
+      printf("\nRead scalar matrix from json file %s\n", path);
+      mats_ptr_t scaptr = (mats_ptr_t)get_recordPTR_from_pID(packedID,"",__func__,0);
+      printf ("  stored matrix now has address %p", scaptr);
+  }
+  else
+  {
+     matns_ptr_t matptr = (matns_ptr_t)get_recordPTR_from_pID(packedID,"",__func__,0);
+     printf("\nRead %d,%d-level matrix from json file %s\n",
+         matptr->row_level, matptr->col_level, path);
+     printf ("  stored matrix now has address %p", matptr);
+  }
+  printf ("  and packedID %" PRId64 "\n", packedID);
 
   if (j_key_exists(j, "info")) {
     if (verbose) printf("Found info key in %s\n", __func__);
@@ -1383,132 +1684,507 @@ mat_ptr_t read_larcMatrix_file_legacy_return_matPTR(char *path)
     
     for (i=0; i<len_info-1; i++)
       {
-	json_t *p = j_key_index(t_info, i);
-	const char *info_name = j_get_name(p);
-	const char *info_data = j_get_string(p);
-	if (verbose) {printf("For i=%"PRId64", and key=%s\n", i, info_name);}
+        json_t *p = j_key_index(t_info, i);
+        const char *info_name = j_get_name(p);
+        const char *info_data = j_get_string(p);
+        if (verbose) {printf("For i=%"PRId64", and key=%s\n", i, info_name);}
 	info_type_t info_type = get_info_type_from_string_name((char *) info_name);
-	
-	int fail =  info_set(info_type, matid, info_data);
-	if (fail) {fprintf(stderr,"panic in %s\n",__func__); exit(1);}
-	if (verbose) {
-	  printf("Added info field %s to info_store\n", info_name);
-	  printf("  with value %s\n", info_data);
-	}
+	int fail =  info_set(info_type, packedID, info_data);
+        if (fail) {fprintf(stderr,"panic in %s\n",__func__); exit(1);}
+        if (verbose) {
+          printf("Added info field %s to InfoStore\n", info_name);
+          printf("  with value %s\n", info_data);
+        }
       }
   }  // end of if j_key_exists for "info"
 
   fclose(f);
   j_set_null(j); free(j);
-
-  return ret;
+  return packedID;
 }
 
-// SPECIFIC EXAMPLES OF ALTERING A MATRIX BEFORE STORING IT
-// These functions are left over from before the read_and_alter_scalars
-// functionality was implemented. 
-//
-// They are unittested, so simply removing them is a bad idea.
-
-/*
-This function reads in the matrix stored in a json file format
-at location path, and modifies the small scalars in the matrices
-to zeros, then stores the new matrix into the matrix store
-and returns the matrixID of the resulting collapsed matrix.
-The small scalars are any scalars that are less than or equal
-to the value threshold.
-TODO:
-Keep in the info file any information about which matrix this
-came from and another record with how much it was zeroized.
-*/
-mat_ptr_t matrix_read_larcMatrix_file_zeroize_small_scalars(char *path, scalarType threshold)
+/************************************************************************
+ * We will be creating a structure which looks like a quadtree and 
+ * contains the information needed to create the LARC matrix quadtree.
+ * We will use the indices 0 to num_nonzeros-1 for matrices containing
+ * a single nonzero entry.  We will call these "leaf nodes" since they
+ * will be leafs in our quadtree-like structure.
+ * We will use indices from num_nonzeros to num_nonzeros + internal_nodes-1
+ * for nodes that will represent matrices with more than one nonzero entry.  
+ * We call the nodes with more than one nonzero entry "internal nodes"
+ * and the internal nodes each have four children, their quads,  which will
+ * either contain a -1 if they correspond to a zero quadrant submatrix
+ * or contain a leaf node index or contain another internal node index.
+ * Note that this quadtree-like structure is not a full quadtree: many
+ * branches terminate early with a leaf labeled -1 to indicate the entire
+ * branch below this is zero; also, many branches terminate early with a
+ * leaf labeled with a small index (these correspond to a matrix with a
+ * single nonzero entry).
+ ************************************************************************/
+/*!
+ * \ingroup larc
+ * \brief Constructs a quadtree-like structure from input coordinate/value data, to be used to generate the compressed LARCMatrix for the matrix described by this data
+ * \param num_nonzeros The number of (i,j,val_{ij}) pairs in the input data structure
+ * \param max_level The log of the size of the LARCMatrix to be generated
+ * \param data A structure containing the (i,j,val_{ij}) pairs
+ * \param qls A structure containing the information which will be used to construct the compressed LARCMatrix.
+ */
+static void create_QLS_from_position_value_pairs(unsigned num_nonzeros,
+mat_level_t max_level, struct dataByCoordinate *data, struct dataForQLS *qls)
 {
-    mat_ptr_t mat_ptr = matrix_read_larcMatrix_file_flatten_small_scalars(path, threshold, scalar0);
-    
-    return mat_ptr;
-}
+  int verbose = 1;
 
-/* Python interface to return a matrixID after reading a json file */
-int64_t matrix_read_larcMatrix_file_zeroize_small_scalars_matrixID(char *path, char *threshold)
-{
-    scalarType thresh;
-    sca_init(&thresh);
-    sca_set_str(&thresh, threshold);
+  /************************************************************************
+   * For the worst case, the number of internal nodes is smaller than
+   *     (num_nonzeros) * (the base_2 log of the dimension of the matrix).
+   * We will be lazy and just create arrays big enough to hold the worst case
+   * stuff. And we add an extra num_nonzeros to our array so that we can be
+   * even more lazy and use distinct numbers for all the leaf nodes and
+   * internal nodes.
+   * Each internal node has 4 children, quad[0], quad[1], quad[2], and quad[3]
+   ************************************************************************/
+  const int64_t max_internal_nodes = num_nonzeros * (max_level+1);
 
-    mat_ptr_t m_ptr = matrix_read_larcMatrix_file_zeroize_small_scalars(path, thresh);
-    sca_clear(&thresh);
+  // first index that is beyond the leaf_node indices will be the internal
+  // node with maximal level
+  const int64_t top_internal_node_index = num_nonzeros;
 
-    return get_matID_from_matPTR(m_ptr);
-}
+  if (verbose==DEBUG) {
+    fprintf(stderr,"we set max_internal_nodes to %" PRId64 "\n",max_internal_nodes);
+    fprintf(stderr,"the first internalnode index is set to %" PRId64 "\n",
+        top_internal_node_index);
+  }
 
-typedef struct flattening_vars_s {
-    int initialized;
-    scalarType threshold;
-    scalarType flatValue;
-} flattening_vars_t;
+  /************************************************************************
+   * We initialize the value of each quad to be -1 
+   * indicating they correspond to zero matrices.
+   ************************************************************************/
+  for (int64_t node_index = top_internal_node_index ;
+       node_index < max_internal_nodes ; node_index++)
+  {
+      for (int quad_index = 0 ; quad_index <4 ;quad_index++)
+        qls->quad[node_index][quad_index] = -1;
+  }
+  if (verbose==DEBUG) fprintf(stderr,"all quads are initialized to -1\n");
 
-flattening_vars_t flatVars = {0};
 
-// not for general use
-void flatten_scalar(scalarType *flat, const scalarType flatten_this)
-{
-    sca_norm(flat, flatten_this);
-    // set flat to flatValue if 
-    //      |flatten_this| < threshold
-    // and flatten_this != 0. 
-    if ((sca_cmp(*flat, flatVars.threshold) < 0)
-           && (sca_eq(flatten_this, scalar0) == 0))
-        sca_set(flat, flatVars.flatValue);
-    else
-        sca_set(flat, flatten_this);
-}
+  /************************************************************************
+   * We create the first internal node in our quadtree like structure and
+   * which will be the top node (the root). 
+   * It corresponds to a 2^max_level by 2^max_level matrix.
+   * Each child node in the four quads of a node will have level -1 of 
+   * it's parent, and correspond to the four quadrant submatrics of the 
+   * parent matrix.
+   * This top node will have the first MatrixMarket entry with leaf_index =0 
+   * as one of its quads initially. 
+   * Whenever a new leaf node wants to join our quadtree like structure in
+   * the same position as an old leaf, we will create a new internal node
+   * and try to insert the colliding leaves in as children of the internal
+   * node.  As we go down the tree, the level of the matrices corresponding
+   * to nodes decreases.
+   ************************************************************************/
 
-/*
-This function reads in the matrix stored in a json file format
-at location path, and modifies the small scalars in the matrices
-to zeros, then stores the new matrix into the matrix store
-and returns the matrixID of the resulting collapsed matrix.
-The small scalars are any scalars that are less than or equal
-to the value threshold.
-TODO:
-Keep in the info file any information about which matrix this
-came from and another record with how much it was flattend.
-*/
-mat_ptr_t matrix_read_larcMatrix_file_flatten_small_scalars(char *path, scalarType threshold, scalarType flatValue)
-{
-    if (!flatVars.initialized){
-        sca_init(&flatVars.threshold);
-        sca_init(&flatVars.flatValue);
-        flatVars.initialized = 1;
+  // set the root node in the QLS to max_level
+  qls->internal_node_level[top_internal_node_index] = max_level;
+  // the root  is our first internal node
+  qls->num_internal_nodes = 1;
+
+  if (verbose==DEBUG)
+  {
+    fprintf(stderr,
+        "internal_node_level[top_internal_node_index] set to %d\n",max_level);
+  }
+
+  /************************************************************************
+  * Loop over the MM nonzero entries and insert each into our own quadtree like
+  * structure, creating internal nodes as needed, until each nonzero entry
+  * is on a "leaf node" of some level. The leaf node will correspond to a 
+  * submatrix of the given leaf_level, whose scalars are all zero except for 
+  * a single nonzero entry given by val[leaf_node_index] whose
+  * position is calculated using row[leaf_node_index] and col[leaf_node_index]
+  * and the leaf_level of the submatrix.
+  ************************************************************************/
+
+
+  /************************************************************************
+  * We loop over all the other nonzero entries in the MatrixMarket making
+  * a leaf node for each nonzero entry and pushing the leaf node into our
+  * structure by starting at the first internal node and branching downward
+  * until we either can substitute into a position with a -1 (corresponding
+  * to an all zero submatrix) or we have a collision with another leaf node,
+  * in which case we create a new internal node at that location and push the
+  * existing object under the new internal node, then try to add the new node
+  * under the new internal node (which is easy if in a quad labeled -1,
+  * otherwise we must continue to recurse.
+  *
+  * The first leaf node is inserted into the top internal node and given the
+  * same level as that internal node (it will be lowered later when other
+  * nodes are added). We loop over the other leaf nodes, modifying the
+  * internal node tree structure as needed. Algorithmically, we have three
+  * possible cases when inserting a new leaf L: 
+  *
+  * 1. current location holds -1,
+  *    ACTION: replace -1 with our leaf node L
+  *    break out of inner loop to deal with next leaf node
+  *
+  * 2. current location holds an internal node
+  *                 (number >= top_internal_node_index)
+  *    ACTION descend to this internal node and re-evaluate situation
+  *    this is handled by a nested while() loop
+  *
+  * 3. current location holds a leaf node K
+  *                 (number < top_internal_node_index)
+  *    ACTION:  a. create new internal node B and replace K with B
+  *                            this new node will have level one less than
+  *                            the internal node contaning it
+  *             b. K becomes a quad in B (since B is empty this is simple)
+  *                     the leaf level of K is reduced by 1
+  *             c. reduce the leaf level of L by 1
+  *             d. decend to B and re-evaluate situation
+  *                   this is handled by a nested while() loop
+  ************************************************************************/
+
+  // initial values for the loop
+  mat_level_t current_level = max_level;
+
+  // initialize the quadtree-like structure with the first element of the
+  // matrix market data (index 0). This node's leaf_level is set to one less
+  // than the max_level.
+  int quad_index = get_quad_in_submatrix(data->row[0],
+        data->col[0],current_level);
+  qls->quad[top_internal_node_index][quad_index] = 0;  
+  qls->leaf_level[0] = max_level-1;
+
+  if (verbose==DEBUG)
+  {
+    fprintf(stderr,"For leaf_node_index 0, we set\n");
+    fprintf(stderr,"quad_index = %d, ",quad_index);
+    fprintf(stderr,"top_internal_node_index = %" PRId64 "\n",
+        top_internal_node_index);
+    fprintf(stderr,"quad[%" PRId64 "][%d] set to 0 and has level %d\n",
+        top_internal_node_index, quad_index,
+        qls->internal_node_level[top_internal_node_index]);
+    fprintf(stderr,"setting leaf_level[0] to %d\n",qls->leaf_level[0]);
+  } 
+
+  // loop to place the leaf_nodes into our quadtree like structure
+  // and create any internal nodes necessary to tack the leafs together
+  for (int64_t leaf_node_index=1; leaf_node_index<top_internal_node_index;
+        ++leaf_node_index) 
+  {
+    // the algorithm first attempts to insert a leaf node into the
+    // internal node at top node of tree
+    int64_t node_index = top_internal_node_index;
+    current_level = max_level; // the level of the internal node at top of tree
+    if (verbose==DEBUG)
+    {
+      fprintf(stderr,"\ntop of loop: leaf_node_index is now %" PRId64 "\n",
+                leaf_node_index);
+      fprintf(stderr,"node_index set to %" PRId64 "\n",node_index);
     }
-    sca_set(&flatVars.threshold, threshold);
-    sca_set(&flatVars.flatValue, flatValue);
-    // flatten_scalar routine checks that values are nonzero before flattening.
-    return read_and_alter_vals_larcMatrix_file_return_matPTR(path, flatten_scalar);
-}
 
+    // while loop exits when leaf node has been successfully inserted
+    while(1) {
+      if (verbose==DEBUG)
+      {
+        fprintf(stderr,"top of while(1) loop:\n");
+        fprintf(stderr,"calling get_quad_in_submatrix\n");
+      }
+      // find the quad index for the current leaf. This depends on the
+      // current matrix level, which will decrease as loop repeats
+      quad_index = get_quad_in_submatrix(data->row[leaf_node_index],
+                data->col[leaf_node_index], current_level);
+      if (verbose==DEBUG)
+        fprintf(stderr,"returned quad_index value is %d\n",quad_index);
 
-/* Python interface to return a matrixID after reading a json file */
-int64_t matrix_read_larcMatrix_file_flatten_small_scalars_matrixID(char *path, char *threshold, char *flatValue)
+      // case 1: The quad we would like to put the leaf node in corresponds
+      // to a zero matrix (which is indicated when the value in the quad is
+      // -1). We can replace the zero matrix with the leaf node.
+      if (qls->quad[node_index][quad_index] == -1) {
+        // zero matrix is currently in desired location, so we can insert
+        // leaf node and continue the leaf_node_index loop
+        qls->quad[node_index][quad_index] = leaf_node_index;
+        // this leaf's level is set to one level below internal node level
+        qls->leaf_level[leaf_node_index] = current_level-1;   
+        if (verbose==DEBUG)
+        {
+          fprintf(stderr,"case 1 executed:\n");
+          fprintf(stderr,"quad[%" PRId64 "][%d] set to %" PRId64 " with leaf level %d\n",
+                node_index,quad_index,leaf_node_index,current_level-1);
+          fprintf(stderr,"this node is level %d\n",
+                qls->internal_node_level[node_index]);
+        }
+        break; // out of while(1), go to next leaf node
+      }
+
+      // case 2: The quad we would like to put the leaf node in corresponds
+      // to an internal node (indicated when the value in the quad is a node
+      // number that is greater than or equal to top_internal_node_index).
+      // Since an internal node was in desired position to insert the leaf
+      // node, we need to descend further down into the tree from the internal
+      // node and stay in the while loop to attempt insertion again.
+      if (qls->quad[node_index][quad_index] >= top_internal_node_index) {
+        node_index = qls->quad[node_index][quad_index];
+        --current_level;
+        if (verbose==DEBUG)
+        {
+          fprintf(stderr,"case 2 executed: node index changed to ");
+          fprintf(stderr,"%" PRId64 ",\n current_level changed to %d\n",
+                node_index, current_level);
+          fprintf(stderr,"this node is level %d\n",
+                qls->internal_node_level[node_index]);
+        }
+        continue; // while(1)
+      }
+
+      // case 3: The quad value corresponds to a previously stored leaf node
+      // (indicated by the value in the quad being between 0 and
+      // leaf_node_index). In this case we have a collision with a previously
+      // inserted leaf node, so we will create a new internal node and push
+      // the previous leaf into one of the quads of this new internal node,
+      // then continue in the while loop trying to insert our leaf node
+      // starting from the new internal node.
+
+      if (verbose==DEBUG) fprintf(stderr,"case 3 executing:\n");
+      int64_t old_leaf_node_index = qls->quad[node_index][quad_index];
+
+      // case 3': Make sure that the new and old leaf nodes do not have the
+      // same (i,j) values. This will not happen in correct MM data, but we
+      // need to protect against it.
+      if (data->row[old_leaf_node_index]==data->row[leaf_node_index] &&
+          data->col[old_leaf_node_index]==data->col[leaf_node_index])
+      {
+        // if data values are different, we can't go on; if data is repeated,
+        // though technically invalid, we could continue, but right now we
+        // don't have the code written to fix up our data structure after this
+        // happens.
+        // So, either way we exit the program
+        //
+        // The error message adds 1 to the stored (i,j) values to compensate
+        // for our previously subtracting 1 to become zero-based
+        fprintf(stderr,"ERROR: input matrix market data has two (or more) ");
+        fprintf(stderr,"entries at position (%d, %d)\n",
+          1+data->row[leaf_node_index],1+data->col[leaf_node_index]);
+        // add additional info about whether data is same or different
+        if (sca_eq(data->val[old_leaf_node_index],data->val[leaf_node_index]))
+          fprintf(stderr,"with the same value!\n");
+        else
+          fprintf(stderr,"with different values!\n");
+        fprintf(stderr,"exiting due to bad input data...\n");
+        exit(0);
+      }
+
+      // a) create new internal node, level one less than current internal node
+      current_level--;
+      int64_t new_internal_node_index =
+                top_internal_node_index + qls->num_internal_nodes;
+      qls->internal_node_level[new_internal_node_index] = current_level;
+      qls->num_internal_nodes++;
+      // b) replace old leaf with new internal node
+      qls->quad[node_index][quad_index] = new_internal_node_index;
+      if (verbose==DEBUG)
+      {
+        fprintf(stderr,"create new internal node with index %" PRId64 " and level %d\n",
+                      new_internal_node_index, current_level);
+        fprintf(stderr,"quad[%" PRId64 "][%d] changed to %" PRId64 "\n",
+                      node_index, quad_index, new_internal_node_index);
+        fprintf(stderr,"node %" PRId64 " is level %d\n",
+                node_index, qls->internal_node_level[node_index]);
+      }
+      // c) place old leaf in a quad of the new internal node, and also
+      //    change the node level of this leaf
+      if (verbose==DEBUG)
+      {
+        fprintf(stderr,"calling get_quad_in_submatrix, with ");
+        fprintf(stderr,"row value %d, column value %d, and ",
+                      data->row[old_leaf_node_index], data->col[old_leaf_node_index]);
+        fprintf(stderr,"level %d\n",current_level);
+      }
+      quad_index = get_quad_in_submatrix(data->row[old_leaf_node_index],
+                      data->col[old_leaf_node_index],current_level);
+      qls->quad[new_internal_node_index][quad_index] = old_leaf_node_index;
+      qls->leaf_level[old_leaf_node_index] = current_level-1;
+      if (verbose==DEBUG)
+      {
+        fprintf(stderr,"resulting quad_index is %d\n",quad_index);
+        fprintf(stderr,"quad[%" PRId64 "][%d] set to %" PRId64 "\n",
+                new_internal_node_index,quad_index,old_leaf_node_index);
+        fprintf(stderr,"node %" PRId64 " is level %d\n", new_internal_node_index,
+                qls->internal_node_level[new_internal_node_index]);
+        fprintf(stderr,"leaf level of leaf %" PRId64 " is now %d\n",
+                old_leaf_node_index, qls->leaf_level[old_leaf_node_index]);
+      }
+      // d) set the node_index to the new internal node then continue in the
+      // while loop
+      node_index = new_internal_node_index;
+      continue;
+    } // while (1)
+  } // for (leaf_node_index)
+
+  if (verbose==DEBUG)
+        fprintf(stderr,"completed loops over leaf node index, while(1)\n");
+} // end create_QLS_from_position_value_pairs
+
+/*!
+ * \ingroup larc
+ * \brief Uses a quadtree-like structure and the value field from input coordinate/value data to generate the compressed LARCMatrix for the matrix described by this data
+ * \param num_nonzeros The number of (i,j,val_{ij}) pairs in the input data structure
+ * \param data A structure containing the (i,j,val_{ij}) pairs
+ * \param qls A structure containing the information which will be used to construct the compressed LARCMatrix.
+ * \return The packedID of the LARCMatrix generated
+ */
+static int64_t build_larcMatrix_using_QLS(int64_t num_nonzeros,
+        struct dataByCoordinate *data, struct dataForQLS *qls)
 {
-  scalarType thresh, flatVal;
-  sca_init(&thresh);
-  sca_init(&flatVal);
-  sca_set_str(&thresh, threshold);
-  sca_set_str(&flatVal, flatValue);
+  const int verbose = 1;
 
-  mat_ptr_t m_ptr = matrix_read_larcMatrix_file_flatten_small_scalars(path, thresh, flatVal);
-  sca_clear(&thresh);
-  sca_clear(&flatVal);
+  // Now we will create the LARC matrix from our quadtree like reprentation
+  // of the MatrixMarket matrix and the input data values
+  
+  // First we go through all the leaf nodes of our structure and load a
+  // matrix into LARC that has the right level and has a single nonzero entry
+  // in the appropriate position.
 
-  return get_matID_from_matPTR(m_ptr);
-}
+  // Create an array of matrix pointers for LARC matrices
+  int64_t *node_ID_ptr;
+  node_ID_ptr = (int64_t *)malloc(
+        (num_nonzeros + qls->num_internal_nodes)*sizeof(int64_t));
+  if (node_ID_ptr == NULL) {
+    fprintf(stderr,"ERROR in %s, line %d: Out of memory.\n",__func__,__LINE__);
+    exit(1);
+  }
 
+  // Matrix Pointers are created first for all the maximally sized
+  // quadrant submatrices in the LARC matrix with only a single nonzero
+  // value.  These are precisely those corresponding to the leaf nodes
+  // of our quadtreelike structure, which corresponded to the nonzero
+  // values we read in from the MatrixMarket file.
 
+  // Loop through the leaf_index for all the nonzero scalars
+  // passing their value, level, and row, col coordinates
+  // and construct the appropriate matrix in LARC and return the ptr.
+  if (verbose==DEBUG) fprintf(stderr,"start of loop over leaves\n");
+
+  for (int leaf_index=0;leaf_index<num_nonzeros;++leaf_index) {
+    if (verbose==DEBUG)
+    {
+      fprintf(stderr,"leaf_index = %d\n",leaf_index);
+      fprintf(stderr," leaf_level[%d] = %d\n",
+                    leaf_index,qls->leaf_level[leaf_index]);
+      fprintf(stderr," row[%d] = %d\n",leaf_index,data->row[leaf_index]);
+      fprintf(stderr," col[%d] = %d\n",leaf_index,data->col[leaf_index]);
+      fprintf(stderr," val[%d] = %s\n",leaf_index,
+	sca_get_readable_approx_str(data->val[leaf_index]));
+    }
+
+    int64_t valID=get_valID_from_valString(sca_get_readable_approx_str(data->val[leaf_index]));
+    node_ID_ptr[leaf_index] = get_matrix_with_single_nonzero_at_coords(
+           qls->leaf_level[leaf_index], data->row[leaf_index],
+           data->col[leaf_index], valID);
+
+    // The scalar value is now stored in the matrixStore, so we no longer
+    // need it as a scalarType. Clearing it will free up memory when
+    // scalarType is multiprecision (and otherwise is a no-op)
+    sca_clear(data->val+leaf_index);
+
+  } // loop over leaf_index
+  if (verbose==DEBUG) fprintf(stderr,"end of loop over leaves\n");
+
+  // at this point, we can free the memory from several arrays, namely
+  // data->row, data->col, data->val, and qls->leaf_level.
+  free(data->val); data->val = (scalarType *)NULL;
+  free(data->row); data->row = (unsigned *)NULL;
+  free(data->col); data->col = (unsigned *)NULL;
+  free(qls->leaf_level); qls->leaf_level = (mat_level_t *)NULL;
+
+  if (verbose) 
+  {
+     fprintf(stderr,"matrix market reader:");
+     fprintf(stderr,"finished making single-nonzero submatrices\n");
+     fprintf(stderr,"now building LARC matrix \n");
+  }
+
+  // PackedIDs are created for all the internal nodes by going through
+  // the indices in reverse order to their insertion. We will use the set of
+  // quad values for each internal_node to create a list of packedIDs
+  // to build the LARC matrix for that internal node.
+  int64_t subMatList[4];
+
+  // #nodes = #leaves + #internal nodes
+  const int64_t num_nodes = num_nonzeros + qls->num_internal_nodes;
+
+  if (verbose==DEBUG) fprintf(stderr,"start of loop over internal nodes\n");
+  // since the node with maximum level is the first internal node, we loop
+  // backward over the internal nodes to fill up the LARCMatrix structure;
+  // the lower-level submatrices we create first will be used in building up
+  // the higher-level submatrices.
+
+  // The top internal node index == num_nonzeros;
+  for (int64_t internal_node_index = num_nodes - 1;
+       internal_node_index>=num_nonzeros; --internal_node_index)
+  {
+    // internal_node_index
+    const mat_level_t level = qls->internal_node_level[internal_node_index];
+    if (verbose==DEBUG)
+    {
+      fprintf(stderr,"\tinternal node index is %" PRId64 "\n",internal_node_index);
+      fprintf(stderr,"\tinternal node level is %d\n",level);
+    }
+
+    // since we assuming a sparse matrix we retrieve the packedID
+    // for the zero matrix of the correct level for quads
+    int64_t zero_packedID = get_zero_pID(level-1,level-1);
+
+    // Build a subMatList from packedIDs associated with each quad value,
+    if (verbose==DEBUG)
+        fprintf(stderr,"start of loop over internal node indices\n");
+
+    for (int index=0;index<4;++index) {
+      int64_t quad_value = qls->quad[internal_node_index][index];
+      if (verbose==DEBUG)
+      {
+        fprintf(stderr,"index = %d\n",index);
+        fprintf(stderr,"quad_value = %" PRId64 "\n",quad_value);
+      }
+
+      // get the packedID for the zero or nonzero submatrix
+      if (quad_value == -1) subMatList[index] = zero_packedID;  
+      else subMatList[index] = node_ID_ptr[quad_value];
+      if (verbose==DEBUG) fprintf(stderr,"going to next index value\n");
+    }
+
+    if (verbose==DEBUG)
+        fprintf(stderr,"end of loop over internal node indices\n");
+
+    // build a matrix from the four subMatIDs
+    node_ID_ptr[internal_node_index] = get_pID_from_array_of_four_sub_pIDs(
+                subMatList, level, level);
+  } // end loop over internal_node_index
+  if (verbose==DEBUG)
+  {
+     fprintf(stderr,"end of loop over internal nodes\n");
+     fprintf(stderr,"num_nonzeros = %" PRId64 "\n",num_nonzeros);
+  }
+
+  // The pointer to the LARC matrix is the pointer associated with the top node
+  // of our node_ptr list, which is at num_nonzeros (just after the last leaf
+  // node pointer)
+//  matns_ptr_t ret_ptr = node_ptr[num_nonzeros];
+  int64_t ret_pID = node_ID_ptr[num_nonzeros];
+  if (verbose==DEBUG)
+     fprintf(stderr,"about to free node_ptr array\n");
+
+  free(node_ID_ptr);
+
+  if (verbose==DEBUG) 
+     fprintf(stderr,"freed node_ptr array\n");
+
+  return ret_pID;
+} // end build_larcMatrix_using_QLS
 
 
 /********************************************************
- * routine: read_matrixMarketExchange_file_return_matPTR()
+ * routine: read_matrixMarketExchange_file()
  * Algorithm for converting from Matrix Market coordinate to LARC format 
  * created by Jenny Zito and coded by Jenny and Steve Cuccaro.
  * to read a Matrix Market Exchange "coordinate" formated
@@ -1532,17 +2208,14 @@ int64_t matrix_read_larcMatrix_file_flatten_small_scalars_matrixID(char *path, c
  * 1 6 33
  * 7 4 -15
  *****************************************************/
-mat_ptr_t read_matrixMarketExchange_file_return_matPTR(char * file_path)
+int64_t read_matrixMarketExchange_file(char * file_path)
 {
 
-#ifdef USE_INTEGER
-  
-#ifdef DEBUG
+#ifdef DEBUG_IO_C
   printf("--> %s : %s: %d\n", __FILE__, __func__, __LINE__);
-#endif  
-  int verbose = 1;
+#endif // #ifdef DEBUG_IO_C 
+  const int verbose = 1;
   int error_code = 0;
-  int errno = 0; 
 
   if (verbose) printf("In %s\n", __func__);
 
@@ -1551,31 +2224,115 @@ mat_ptr_t read_matrixMarketExchange_file_return_matPTR(char * file_path)
   * Open the Matrix Market matrix file.
   ************************************************************************/
   FILE *fp;
-  if((fp = fopen(file_path, "r+")) == NULL) {
+  if((fp = fopen(file_path, "r")) == NULL) {
     fprintf(stderr,"No such file: %s\n",file_path);
     exit(1);   
   }
   if (verbose) printf("Opened the data file %s for reading:\n",file_path);
-
   
-  /************************************************************************
-  * Reading the Matrix Market coordinate file: 
-  *   HEADER:
-  *      For example: %% MatrixMarket matrix coordinate integer general
-  *      * Read first line starting with "%%" and grab the space-separated strings.
-  *      * Verify that contents of this line have first three strings:
-  *        "MatrixMarket", "matrix", and  "coordinate".
-  *      * The fourth string should be:
-  *        "integer" "real" or "complex"
-  *        Assign this string to MM_scalarType.
-  *      * The fifth string should be "general" "symmetric", "skew-symmetric" or "Hermetian"
-  *        Assign this string to MM_symmetry
-  ************************************************************************/
-  // ADD CODE HERE and
-  // REPLACE THIS HACK:
-  char* MM_scalarType = "integer";  // TODO: handle real and complex eventually
-//  char* MM_symmetry = "general";    // TODO: handle other symmetry types for which MM
-//                                    //       is only giving us the lower triangular matrix.
+  // read in header line
+#define MM_MAX_LINE_LENGTH 1025
+#define MM_MAX_TOKEN_LENGTH 64
+  char headerMM[MM_MAX_LINE_LENGTH];
+  if (fgets(headerMM,MM_MAX_LINE_LENGTH, fp) == NULL)
+  {
+     fprintf(stderr,"matrix market reader: input file has no header!\n");
+     return MATRIX_ID_INVALID;
+  }
+
+  // parse header line, check component values
+  char bannerMM[MM_MAX_TOKEN_LENGTH];
+  char mtxMM[MM_MAX_TOKEN_LENGTH];
+  char crdMM[MM_MAX_TOKEN_LENGTH];
+  char data_typeMM[MM_MAX_TOKEN_LENGTH];
+  char storage_schemeMM[MM_MAX_TOKEN_LENGTH];
+
+  int ival;
+  if ((ival=sscanf(headerMM, "%s %s %s %s %s", bannerMM, mtxMM,
+        crdMM, data_typeMM, storage_schemeMM)) != 5)
+  {
+     fprintf(stderr,"matrix market reader: input file has incorrect header!\n");
+     fprintf(stderr,"only read in %d terms of 5.\n",ival);
+     return MATRIX_ID_INVALID;
+  }
+
+  // check banner (first field) for validity
+  if (strcmp(bannerMM,"%%MatrixMarket"))
+  {
+     fprintf(stderr,"matrix market reader: 'banner' ('%s') is incorrect!\n",
+        bannerMM);
+     return MATRIX_ID_INVALID;
+  }
+
+  // check second field ('matrix')
+  char *p;
+  for (p=mtxMM; *p!='\0'; *p=tolower(*p),p++); // convert to lower case
+  if (strcmp(mtxMM,"matrix"))
+  {
+     fprintf(stderr,"matrix market reader: 'mtx' (%s)is incorrect!\n", mtxMM);
+     return MATRIX_ID_INVALID;
+  }
+
+  // check third field ('coordinate' or 'array')
+  for (p=crdMM; *p!='\0'; *p=tolower(*p),p++); // convert to lower case
+  if (0==strcmp(crdMM,"coordinate")); // sparse format
+  else // LARC only processes sparse format MM files
+  {
+     fprintf(stderr,"matrix market reader: 'crd' is '%s';\n",crdMM);
+     fprintf(stderr,"LARC does not currently support this format.\n");
+     return MATRIX_ID_INVALID;
+  }
+
+  // check fourth field (datatype)
+  for (p=data_typeMM; *p!='\0'; *p=tolower(*p),p++); // convert to lower case
+  // valid types are integer, real, double, complex, pattern
+  if (strcmp(data_typeMM,"integer") && strcmp(data_typeMM,"real") &&
+        strcmp(data_typeMM,"double") && strcmp(data_typeMM,"complex")  &&
+        strcmp(data_typeMM,"pattern") )
+  {
+     fprintf(stderr,"matrix market reader: 'data_type' is '%s';\n",data_typeMM);
+     fprintf(stderr,"LARC does not currently support this type.\n");
+     return MATRIX_ID_INVALID;
+  }
+
+  // check fifth field
+  for (p=storage_schemeMM; *p!='\0'; *p=tolower(*p),p++); //convert to lowercase
+  // valid schemes are general, symmetric, skew-symmetric, hermitian
+  if (   strcmp(storage_schemeMM,"general")
+      && strcmp(storage_schemeMM,"symmetric")
+      && strcmp(storage_schemeMM,"skew-symmetric")
+      && strcmp(storage_schemeMM,"hermitian") )
+  {
+     fprintf(stderr,"matrix market reader: 'storage_scheme' is '%s';\n",
+        storage_schemeMM);
+     fprintf(stderr,"LARC does not currently support this scheme.\n");
+     return MATRIX_ID_INVALID;
+  }
+
+  // check what type LARC is compiled for, and give warning if there might
+  // be a problem 
+  int typeflag = 0;
+  if (0==strcmp(data_typeMM,"complex"))
+  {
+     typeflag = strcmp(scalarTypeStr,"Integer");
+     typeflag |= strcmp(scalarTypeStr,"MPInteger");
+     typeflag |= strcmp(scalarTypeStr,"Real");
+     typeflag |= strcmp(scalarTypeStr,"MPReal");
+     typeflag |= strcmp(scalarTypeStr,"MPRational");
+  }
+  else if ( (0==strcmp(data_typeMM,"real")) ||
+        (0==strcmp(data_typeMM,"double")) )
+  {
+     typeflag = strcmp(scalarTypeStr,"Integer");
+     typeflag |= strcmp(scalarTypeStr,"MPInteger");
+  }
+  if (typeflag)
+  {
+     fprintf(stderr,"matrix market reader: data type of file is\n");
+     fprintf(stderr,"%s, but LARC is compiled with scalarType %s\n",
+               data_typeMM, scalarTypeStr);
+     fprintf(stderr,"This could be a problem...\n");
+  }
 
   /************************************************************************
   * Reading the Matrix Market coordinate file: 
@@ -1583,8 +2340,15 @@ mat_ptr_t read_matrixMarketExchange_file_return_matPTR(char * file_path)
   *       * ignore comment lines starting with "% "
   *       * ignore blank lines
   ************************************************************************/
-  // ADD CODE HERE
-
+  char line[MM_MAX_LINE_LENGTH];
+  do
+  {
+      if (fgets(line,MM_MAX_LINE_LENGTH,fp)==NULL)
+      {
+         fprintf(stderr,"matrix market reader: no data in file %s\n",file_path);
+         return MATRIX_ID_INVALID;
+      }
+  } while (line[0] == '%');
   
   /************************************************************************
   * Reading the Matrix Market coordinate file:
@@ -1595,13 +2359,15 @@ mat_ptr_t read_matrixMarketExchange_file_return_matPTR(char * file_path)
   ************************************************************************/
   unsigned MM_num_rows;
   unsigned MM_num_cols;
-  unsigned num_nonzeros;
+  unsigned MM_num_nonzeros;
   
-  // read in the first line from the MatrixMarket file which doesn't start with "%"
-  int ret = fscanf(fp, "%u %u %u", &MM_num_rows, &MM_num_cols, &num_nonzeros);
+  // read in the first line from the MatrixMarket file not starting with "%"
+  int ret = sscanf(line, "%u %u %u", &MM_num_rows, &MM_num_cols,
+         &MM_num_nonzeros);
   if (ret == 3) {
-    if (verbose) printf("\nRead in MM_num_rows, MM_num_cols, num_nonzeros: %u %u %u\n",
-			MM_num_rows, MM_num_cols, num_nonzeros);
+    if (verbose)
+       printf("\nMM_num_rows, MM_num_cols, MM_num_nonzeros: %u %u %u\n",
+                        MM_num_rows, MM_num_cols, MM_num_nonzeros);
     fflush(stdout);
   } 
   else if(errno != 0) {
@@ -1614,14 +2380,15 @@ mat_ptr_t read_matrixMarketExchange_file_return_matPTR(char * file_path)
     fprintf(stderr,"ERROR: file %s ended early in %s\n", file_path,  __func__);
   }
   else {
+    fprintf(stderr,"return value is %d\n",ret);
     fprintf(stderr,"ERROR while reading levels in %s (routine %s).\n", file_path, __func__);
     error_code = 2;
   }
   if (error_code) {
-#ifdef DEBUG
+#ifdef DEBUG_IO_C
     printf("<-- %s : fail: %d\n", __FILE__, __LINE__);
-#endif  
-    return (MATRIX_PTR_INVALID); 
+#endif // #ifdef DEBUG_IO_C 
+    return MATRIX_ID_INVALID; 
   } 
 
   // if the file is open but nothing is left to read print EOF
@@ -1629,12 +2396,20 @@ mat_ptr_t read_matrixMarketExchange_file_return_matPTR(char * file_path)
     fputs("EOF",stderr);
     fprintf(stderr,"ERROR: File stopped earlier than expected.\n");
     fclose(fp);
-#ifdef DEBUG
+#ifdef DEBUG_IO_C
     printf("<-- %s : fail: %d\n", __FILE__, __LINE__);
-#endif  
-    return (MATRIX_PTR_INVALID); 
+#endif // #ifdef DEBUG_IO_C 
+    return MATRIX_ID_INVALID; 
   }
 
+  // if matrix is not 'general', it must be square
+  // exit if input data dimensions are inconsistent with storage scheme
+  if ( strcmp(storage_schemeMM,"general") && (MM_num_rows != MM_num_cols) )
+  {
+    fprintf(stderr,"ERROR in matrix market input data: non-square matrix\n");
+    fprintf(stderr,"has storage scheme '%s': exiting...\n",storage_schemeMM);
+    exit(1);
+  }
 
   /************************************************************************
   * To store the MM_num_rows by MM_num_columns Matrix Market matrix, 
@@ -1658,10 +2433,11 @@ mat_ptr_t read_matrixMarketExchange_file_return_matPTR(char * file_path)
     col_level++;
   }
 
-  if (verbose)   printf("  levels are %d %d\n",(int)row_level, (int)col_level);
+  if (verbose) printf("  levels are %d %d\n",(int)row_level, (int)col_level);
+
 
   // EVENTUALLY HANDLE NONSQUARE MATRICES
-  // Temporay hack: is make the LARC matrix square
+  // Temporary hack: make the LARC matrix square
   mat_level_t max_level = MAX(row_level,col_level);
   if (row_level != col_level) {
     row_level = col_level = max_level;
@@ -1671,523 +2447,505 @@ mat_ptr_t read_matrixMarketExchange_file_return_matPTR(char * file_path)
   * Reading the Matrix Market coordinate file:
   *    NONZERO MATRIX ENTRIES:
   *       * Each nonzero matrix entry will have a line in the MMfile with
-  *         row and col coordinates followed by the value of scalar in that position:
+  *         row and col coordinates followed by the value of scalar in that
+  *         position:
   *         I J A(I,J)
-  *         If the MM_scalarType is "complex" then A(I,J) has two entries REAL and IMAG.
+  *         If the data_typeMM is "complex" then A(I,J) has two entries REAL
+  *         and IMAG.
+  *    SYMMETRY: If the matrix is
+  *        * 'general': there are MM_num_nonzeros nonzero entries.
+  *        * 'skew-symmetric': there are 2*MM_num_nonzeros nonzero
+  *           entries, since diagonal elements must be zero.
+  *        * 'symmetric' or 'hermitian': there are at most 2*MM_num_nonzeros
+  *          entries, because diagonal elements are not duplicated
   ************************************************************************/
-  unsigned row[num_nonzeros], col[num_nonzeros];
-  int64_t val_integer[num_nonzeros];
-  long double val_real[num_nonzeros];
-  long double val_imag[num_nonzeros];
-  scalarType val[num_nonzeros];
-  mat_level_t leaf_level[num_nonzeros];
-  
-  // make three arrays of length num_nonzeros
+  unsigned max_num_nonzeros = MM_num_nonzeros;
+  if ( strcmp(storage_schemeMM,"general") ) max_num_nonzeros *= 2;
+
+  struct dataByCoordinate data;
+  data.row = (unsigned *)malloc(max_num_nonzeros*sizeof(unsigned));
+  if (data.row == NULL) {
+    fprintf(stderr,"ERROR in %s, line %d: Out of memory.\n", __func__, __LINE__);
+    exit(1);
+  }
+  data.col = (unsigned *)malloc(max_num_nonzeros*sizeof(unsigned));
+  if (data.col == NULL) {
+    fprintf(stderr,"ERROR in %s, line %d: Out of memory.\n", __func__, __LINE__);
+    exit(1);
+  }
+  data.val = (scalarType *)malloc(max_num_nonzeros*sizeof(scalarType));
+  if (data.val == NULL) {
+    fprintf(stderr,"ERROR in %s, line %d: Out of memory.\n", __func__, __LINE__);
+    exit(1);
+  }
+
+  if (verbose==DEBUG) {
+     fprintf(stderr,"have allocated data arrays, using ");
+     size_t mem_alloc = max_num_nonzeros*(2*sizeof(unsigned) + sizeof(scalarType));
+     fprintf(stderr,"%zd bytes of memory\n",mem_alloc);
+  }
+
   // Now we will handle the entries of the matrix
+  // The following code is all that is needed for scheme = 'general';
   int i;
-  if (!strcmp(MM_scalarType,"complex")) {
-    for (i=0;i<num_nonzeros;++i) {
-      ret = fscanf(fp, "%u %u %Lg %Lg", &row[i], &col[i],
-		                      &val_real[i], &val_imag[i]);
-      sca_init(&val[i]);
-      sca_set_2ldoubles(&val[i],val_real[i],val_imag[i]);
+  if (!strcmp(data_typeMM,"complex")) {
+    long double val_real, val_imag;
+    for (i=0;i<MM_num_nonzeros;++i) {
+      ret = fscanf(fp, "%u %u %Lg %Lg", data.row+i, data.col+i,
+                                      &val_real, &val_imag);
+      sca_init(data.val+i);
+      sca_set_2ldoubles(data.val+i,val_real,val_imag);
     }
   }
-  else if (!strcmp(MM_scalarType,"real")) {
-    for (i=0;i<num_nonzeros;++i) {
-      ret = fscanf(fp, "%u %u %Lg", &row[i], &col[i], &val_real[i]);
-      sca_init(&val[i]);
-      sca_set(&val[i],val_real[i]);
+  else if ( (!strcmp(data_typeMM,"real")) || (!strcmp(data_typeMM,"double")) )
+  {
+    long double val_real;
+    for (i=0;i<MM_num_nonzeros;++i) {
+      ret = fscanf(fp, "%u %u %Lg", data.row+i, data.col+i, &val_real);
+      sca_init(data.val+i);
+      sca_set_2ldoubles(data.val+i,val_real,(long double)0.0);
     }
   }
-  else if (!strcmp(MM_scalarType,"integer")) {
-    for (i=0;i<num_nonzeros;++i) {
-      ret = fscanf(fp, "%u %u %ld", &row[i], &col[i], &val_integer[i]);
-      sca_init(&val[i]);
-      sca_set(&val[i],val_integer[i]);
+  else if (!strcmp(data_typeMM,"integer")) {
+    int64_t val_integer;
+    for (i=0;i<MM_num_nonzeros;++i) {
+      ret = fscanf(fp, "%u %u %" SCNd64, data.row+i,data.col+i,&val_integer);
+      sca_init(data.val+i);
+      sca_set_2ldoubles(data.val+i, (long double)val_integer,(long double)0.0);
+    }
+  }
+  else if (!strcmp(data_typeMM,"pattern")) {
+    ret = fscanf(fp, "%u %u",data.row,data.col);
+    sca_init(data.val);
+    sca_set_2ldoubles(data.val, (long double)1.0,(long double)0.0);
+    for (i=1;i<MM_num_nonzeros;++i) {
+      ret = fscanf(fp, "%u %u",data.row+i,data.col+i);
+      sca_init(data.val+i);
+      sca_set(data.val+i,data.val[0]);
     }
   }
   else {
-    fprintf(stderr,"FAIL in %s reading arrays: Unknown MM_scalarType\n",__func__);
+    fprintf(stderr,"FAIL in %s reading arrays: Unknown data_typeMM\n",__func__);
     exit(0);
+  }
+  fclose(fp);
+
+  unsigned num_nonzeros = max_num_nonzeros;
+  // deal with non-general cases: any of the other schemes taking advantange
+  // of symmetry [symmetric, skew-symmetric, hermitian] would put the value
+  // read into position (i,j) and the [same, negated, adjoint] value into
+  // position (j,i), and would only be valid for square matrices
+  if ( strcmp(storage_schemeMM,"general") )
+  {
+    for (i=MM_num_nonzeros;i<max_num_nonzeros;++i)
+    {
+      int i0 = i - MM_num_nonzeros;
+      if (data.row[i0] == data.col[i0]) { --num_nonzeros; }
+      else
+      {
+        data.row[i] = data.col[i0];
+        data.col[i] = data.row[i0];
+        sca_init(data.val+i);
+        if (!strcmp(storage_schemeMM,"symmetric"))
+        {
+          sca_set(data.val+i,data.val[i0]);
+        }
+        else if (!strcmp(storage_schemeMM,"skew-symmetric"))
+        {
+          sca_mult(data.val+i,data.val[i0],scalarM1);
+        }
+        else if (!strcmp(storage_schemeMM,"hermitian"))
+        {
+          sca_conj(data.val+i,data.val[i0]);
+        }
+        // other options (skew-hermitian?) would go here
+        else
+        {
+           fprintf(stderr,"ERROR in matrix market reader: non-implemented\n");
+           fprintf(stderr,"storage_scheme found in processing\n");
+           exit(2);
+        }
+      }
+    }
   }
 
   // change all indices to be zero based instead
   for (i=0;i<num_nonzeros;++i) {
-    --row[i];
-    --col[i];
+    --data.row[i];
+    --data.col[i];
+    if (verbose==DEBUG) 
+    {
+        fprintf(stderr,"\trow[%d] decremented, is now %d\n",i,data.row[i]);
+        fprintf(stderr,"\tcol[%d] decremented, is now %d\n",i,data.col[i]);
+    }
   }
 
-  // ADD CODE below to actually handle the case when MM_scalarType is complex or real.
-  // Our hack is to only handle integer for now.
+  // data has been read in
+  if (verbose) 
+  {
+     fprintf(stderr,"matrix market reader: data read in\n");
+     fprintf(stderr,"now adding data to Quadtree-Like Structure\n");
+  }
 
-
-  
-
-  // TRIVIAL CASE: If there is only one nonzero element in the MatrixMarket matrix
-  //               then we return the matrix ptr of the LARC matrix with a single
-  //               entry given by this nonzero element.
-  leaf_level[0] = max_level;
+  // TRIVIAL CASE: If there is only one nonzero element in the MatrixMarket
+  // matrix then we return the packedID of the LARC matrix with a single
+  // entry given by this nonzero element.
+  if (verbose==DEBUG) fprintf(stderr,"num_nonzeros is %d\n",num_nonzeros);
   if (num_nonzeros == 1) {
-    return get_matPTR_single_nonzero_using_valPTR_at_coords(leaf_level[0],row[0],col[0],&val[0]);  
+    int64_t sca_pID = get_scalarPTR_for_scalarVal(data.val[0])->packedID;
+    if ((row_level==0) && (col_level==0)) // SCALAR matrix
+       return sca_pID;
+    int64_t mat_pID = get_matrix_with_single_nonzero_at_coords(
+           max_level, data.row[0], data.col[0], sca_pID);
+    return mat_pID;
   }
 
+  // NON-TRIVIAL CASE: we first construct a quadtree-like structure from
+  // the row and column coordinates, then use this to determine the largest
+  // submatrices containing only one nonzero value, and build the LARCMatrix
+  // from these submatrices. We have to allocate a fair amount of memory for
+  // the structures generated, and some of this memory is freed within the
+  // routine build_larcMatrix_using_QLS() once it is no longer needed.
 
-  /************************************************************************
-   * We will be creating a structure which looks like a quadtree and 
-   * contains the information needed to create the LARC matrix quadtree.
-   * We will use the indices 0 to num_nonzeros-1 for matrices containing
-   * a single nonzero entry.  We will call these "leaf nodes" since they
-   * will be leafs in our quadtree structure.
-   * We will use indices from num_nonzeros to num_nonzeros + internal_nodes-1
-   * for nodes that will represent matrices with more than one nonzero entry.  
-   * We call the nodes with more than one nonzero entry "internal nodes"
-   * and the internal nodes each have four children, their quads,  which will
-   * either contain a -1 if they correspond to a zero quadrant submatrix
-   * or contain a leaf node index or contain another internal node index.
-   ************************************************************************/
-
-
-  /************************************************************************
-   * For the worst case, the number of internal nodes is smaller than: 
-   *     (num_nonzeros) * (the base_2 log of the dimension of the matrix)
-   * We will be lazy and just create arrays big enough to hold the worst case stuff.
-   * And we add an extra an num_nonzeros to our array so that we can be even more
-   * lazy and use distinct numbers for all the leaf nodes and internal nodes.
-   * Each internal node has 4 children, quad[0], quad[1], quad[2], and quad[3]
-   ************************************************************************/
+  // allocate arrays needed for quadtree-like structure
+  struct dataForQLS qls;
+  qls.leaf_level = (mat_level_t *)malloc(num_nonzeros*sizeof(mat_level_t));
+  if (qls.leaf_level == NULL) {
+    fprintf(stderr,"ERROR in %s, line %d: Out of memory.\n", __func__, __LINE__);
+    exit(1);
+  }
   int64_t max_internal_nodes = num_nonzeros * (max_level+1);
-  int64_t first_internal_node_index = num_nonzeros;   // first index that is beyond
-                                                      // the leaf_node indices
-  int64_t internal_node_index;
-  int64_t quad[max_internal_nodes][4];
-  int quad_index;
-
-  
-  /************************************************************************
-   * We initialize the value of each quad to be -1 
-   * indicating they correspond to zero matrices.
-   ************************************************************************/
-  for (internal_node_index = first_internal_node_index ;
-       internal_node_index < max_internal_nodes ;
-       internal_node_index++)
-    {
-      for (quad_index = 0 ; quad_index <4 ;quad_index++) {
-	quad[internal_node_index][quad_index] = -1;
+  qls.internal_node_level = (mat_level_t *)
+        malloc(max_internal_nodes*sizeof(mat_level_t));
+  if (qls.internal_node_level == NULL) {
+    fprintf(stderr,"ERROR in %s, line %d: Out of memory.\n", __func__, __LINE__);
+    exit(1);
+  }
+  // allocate memory for the quad doubly-dimensioned array
+  qls.quad = (int64_t **)malloc(max_internal_nodes*sizeof(int64_t *));
+  if (qls.quad == NULL) {
+    fprintf(stderr,"ERROR in %s, line %d: Out of memory.\n", __func__, __LINE__);
+    exit(1);
+  }
+  for (i=0;i<max_internal_nodes;++i) {
+      qls.quad[i] = (int64_t *)malloc(4*sizeof(int64_t));
+      if (qls.quad[i] == NULL) {
+        fprintf(stderr,"ERROR in %s, line %d: Out of memory.\n", __func__, __LINE__);
+        exit(1);
       }
-    }
-
-
-  /************************************************************************
-   * We create the first internal node in our quadtree like structure and
-   * which will be the top node (the root). 
-   * It corresponds to a 2^max_level by 2^max_level matrix.
-   * Each child node in the four quads of a node will have level -1 of 
-   * it's parent, and correspond to the four quadrant submatrics of the 
-   * parent matrix.
-   * This top node will have the first MatrixMarket entry with leaf_index =0 
-   * as one of its quads initially. 
-   * Whenever a new leaf node wants to join our quadtree like structure in
-   * the same position as an old leaf, we will create a new internal node
-   * and try to insert the colliding leaves in as children of the internal
-   * node.  As we go down the tree, the level of the matrices corresponding
-   * to nodes decreases.
-   ************************************************************************/
-  int64_t num_internal_nodes = 1;   // our first internal node is the root
-  int64_t top_internal_node_index = first_internal_node_index;
-
-  mat_level_t internal_node_level[max_internal_nodes];
-  internal_node_level[top_internal_node_index] = max_level;
-
-  
-  /************************************************************************
-  * Loop over the MM nonzero entries and insert each into our own quadtree like
-  * structure, creating internal nodes as needed, until each nonzero entry
-  * is on a "leaf node" of some level. The leaf node will correspond to a 
-  * submatrix of the given leaf_level, whose scalars are all zero except for 
-  * a single nonzero entry given by val[leaf_node_index] whose
-  * position is calculated using row[leaf_node_index] and col[leaf_node_index]
-  * and the leaf_level of the submatrix.
-  ************************************************************************/
-
-
-  /************************************************************************
-  * We loop over all the other nonzero entries in the MatrixMarket making
-  * a leaf node for each nonzero entry and pushing the leaf node into our structure
-  * by starting at the top_internal node and branching downward until
-  * we either can substitute into a position with a -1 (corresponding to an
-  * all zero submatrix) or we have a collision another leaf node, in which
-  * case we create
-  * a new internal node at that location and push the existing object
-  * under the new internal node, then try to push or current
-  * we have three possible situations when inserting a new leaf L
-  * 1. current location holds -1,
-  *    ACTION replace -1 with our leaf node, and go to next node to insert
-  * 2. current location holds an internal node (number >= first_internal_node_index)
-  *    ACTION descend to proper quad and re-evaluate situation
-  * 3. current location holds an leaf node K (number < first_internal_node_index)
-  *    ACTION:  a. create new internal node B and replace K with B
-  *             b. K becomes a quad in B (since B is empty this is simple)
-  *             c. starting from B, try to place L
-  ************************************************************************/
-
-  // initial values for the loop
-  mat_level_t current_level = max_level;
-
-  // Find the quad in which to place the leaf_node 0 
-  int64_t leaf_node_index = 0;
-  quad_index = get_quad_in_submatrix(row[leaf_node_index],col[leaf_node_index],current_level);
-  quad[internal_node_index][quad_index] = leaf_node_index;  
-  
-  // loop to place the leaf_nodes into our quadtree like structure
-  // and create any internal nodes necessary to tack the leafs together
-  for (leaf_node_index=1;leaf_node_index<first_internal_node_index;++leaf_node_index) {
-
-    // first attempt at insertion leaf node is in relation to internal node at top node of tree
-    int64_t node_index = top_internal_node_index;
-    current_level = max_level;  // the level of the internal node at top of tree
-
-    // while loop exits  when leaf node has been successfully inserted
-    while(1) {
-      // find the quad index for the current leaf. This depends on the
-      // current matrix level, which will decrease as loop repeats
-      quad_index = get_quad_in_submatrix(row[leaf_node_index],col[leaf_node_index],current_level);
-
-      // case 1: The quad we would like to put the leaf node in corresponds to a zero matrix
-      //         (which is indicated when the value in the quad is -1).
-      //         We can replace the zero matrix with the leaf node.
-      if (quad[node_index][quad_index] == -1) {
-        // zero matrix is currently in desired location, so we can insert leaf node
-	// and continue the leaf_node_index loop
-        quad[node_index][quad_index] = leaf_node_index;
-	// this leaf's level is one level below internal node level
-	leaf_level[leaf_node_index] = current_level-1;   
-        break;
-      }
-
-      // case 2: The quad we would like to put the leaf node in corresponds to an internal node
-      //         (indicated when the value in the quad is a node number that 
-      //          greater than or equal to the first_internal_node_index).
-      //         Since an internal node was in desired position to insert 
-      //         the leaf node, we need to descend further down into the tree 
-      //         from the internal node and stay in the while loop to
-      //         attempt insertion again.
-      if (quad[node_index][quad_index] >= first_internal_node_index) {
-        node_index = quad[node_index][quad_index];
-        --current_level;
-        continue;
-      }
-
-      // case 3: The quad value corresponds to a previously stored leaf node
-      //         (indicated by the value in the quad being between for the
-      //          old_leaf_node_index being between 0 and first_internal_node_index - 1).
-      //         In this case we have a collision with a previously inserted leaf node
-      //         so we will create a new internal node and push the previous leaf into one
-      //         of this new internal nodes quads, then continue in the while loop 
-      //         trying to insert our leaf node starting from the new internal node.
-      int64_t old_leaf_node_index = quad[node_index][quad_index];
-      // a) create new internal node, level one less than current internal node
-      current_level--;
-      int64_t new_internal_node_index = first_internal_node_index + num_internal_nodes;
-      internal_node_level[new_internal_node_index] = current_level;
-      num_internal_nodes++;
-      // b) replace old leaf with new internal node
-      quad[node_index][quad_index] = new_internal_node_index;
-      // c) place old leaf in a quad of the new internal node
-      quad_index = get_quad_in_submatrix(row[old_leaf_node_index],
-                                      col[old_leaf_node_index],current_level);
-      quad[new_internal_node_index][quad_index] = old_leaf_node_index;
-      // c) set the nod_index to the new internal node then continue in the while node
-      //    trying to insert the leaf node.
-      node_index = new_internal_node_index;
-      continue;
-    } // while (1)
-  } // for (leaf_node_index)
-  // This completes making our internal quadtree like representation
-  // of the matrix.  
-
-  // make a matrix pointer to point to the LARC matrix we will build
-  mat_ptr_t ret_ptr;
-
-  
-  // Now we will create the LARC matrix from our quadtree like reprentation
-  // of the MatrixMarket matrix.
-  
-  // First we go through all the leaf nodes of our structure and load a
-  // matrix into LARC that has the right level and has a single nonzero entry
-  // in the appropriate position:
-
-  // Create an array of matrix pointers for LARC matrices
-  mat_ptr_t node_ptr[num_nonzeros + num_internal_nodes];
-
-  // Matrix Pointers are created first for all the maximally sized
-  // quadrant submatrices in the LARC matrix with only a single nonzero
-  // value.  These are precisely those cooresponding to the leaf nodes
-  // of our quadtreelike structure, which cooresponded to the nonzero
-  // values we read in from the MatrixMarket file.
-  // Loop through the leaf_index for all the nonzero scalars
-  // passing their value, level, and row, col coordinates
-  // and construct the appropriate matrix in LARC and return the ptr.
-  for (int leaf_index=0;leaf_index<num_nonzeros;++leaf_index) {
-    node_ptr[leaf_index] = get_matPTR_single_nonzero_using_valPTR_at_coords(
-	   leaf_level[leaf_index],
-	   row[leaf_index],
-	   col[leaf_index],
-	   &val[leaf_index]);
   }
 
-  // Matrix pointers are created for all the internal nodes by 
-  // going through the indices in reverse order to their insertion.
-  // We will use the set of quad values for each internal_node
-  // to create a panel of matrix pointers to build the LARC matrix
-  // for that internal node.
-  mat_ptr_t panel[4];
-  mat_level_t level;
-  int quad_value;
-  int64_t num_nodes = num_nonzeros + num_internal_nodes;  // leafs + internal nodes
+  // create a quadtree-like structure which provides information on the
+  // largest submatrix for which each non-zero entry is the only non-zero
+  // This also determines the number of internal nodes needed for the qls
+  create_QLS_from_position_value_pairs(num_nonzeros, max_level, &data, &qls);
 
-  for (internal_node_index = num_nodes -1;
-       internal_node_index>=first_internal_node_index;
-       --internal_node_index) {
-
-    level = internal_node_level[max_internal_nodes];
-
-    // since we assuming a sparse matrix we retrieve the pointer
-    // for the zero matrix of the correct level for quads
-    mat_ptr_t zero_matrix = get_zero_matrix_ptr(level-1,level-1);
-
-    // Build a panel from matrix pointer associate with each quad value,
-    for (int index=0;index<4;++index) {
-      quad_value = quad[internal_node_index][index];
-      if (quad_value == -1) panel[index] = zero_matrix;  
-      else panel[index] = node_ptr[quad_value];  // get the pointer to nonzero submatrix
-    }
-
-    // build a matrix from the four panels
-    node_ptr[internal_node_index] = get_matPTR_from_array_of_four_subMatPTRs(panel, level, level);
+  if (verbose==DEBUG)
+  {
+     size_t mem_alloc = 0;
+     // memory needed for qls structure
+     mem_alloc += num_nonzeros*sizeof(mat_level_t);
+     mem_alloc += max_internal_nodes*sizeof(mat_level_t);
+     mem_alloc += max_internal_nodes*sizeof(int64_t *);
+     mem_alloc += max_internal_nodes*4*sizeof(int64_t);
+     // memory allocated internally in build_larcMatrix_using_QLS
+     mem_alloc += (num_nonzeros + qls.num_internal_nodes)*sizeof(matns_ptr_t);
+     fprintf(stderr,"total memory needed for QLS and scratch space, not\n");
+     fprintf(stderr,"counting memory allocated for multiprecision\n");
+     fprintf(stderr,"variables: %zd bytes\n",mem_alloc);
+  }
+  if (verbose) 
+  {
+     fprintf(stderr,"matrix market reader: QLS created\n");
+     fprintf(stderr,"now making LARC submatrices with single nonzeros\n");
   }
 
-  // release the space from the array of scalarType
-  for (leaf_node_index=0; leaf_node_index<num_nonzeros; ++leaf_node_index) {
-    sca_clear(&(val[leaf_node_index]));
-  }
+  // We build the submatrices of the LARC matrix which 
+  // 1) each have a single nonzero and
+  // 2) are as large as possible for this matrix
+  // By design, the remaining submatrices are all-zero
 
-  // the pointer to the LARC matrix is the the pointer associated with the top node
-  ret_ptr = node_ptr[top_internal_node_index];
+  int64_t m_pID = build_larcMatrix_using_QLS(num_nonzeros, &data, &qls);
 
-  return ret_ptr;
+  // Release any memory allocated to the structures initialized
+  // by this routine that have not already been freed by the previous
+  // subroutine.
+  free(qls.internal_node_level);
+  for (int64_t i=0; i< max_internal_nodes; ++i) free(qls.quad[i]);
+  free(qls.quad);
 
-#endif    // USE_INTEGER
+  if (verbose) fprintf(stderr,"matrix market reader: finished\n");
+  return m_pID;
 
-  return MATRIX_PTR_INVALID;
-  
-  
-}  // end read_row_major_matrix_from_file
+}  // end read_matrixMarketExchange_file
 
 
-///////////////////////////////////////////////////////////////////////
-
-
-static int   
-recursive_write_larcMatrix_file_return_larcSize_by_matPTR(mat_ptr_t m_ptr, FILE *f, char *output_flags, size_t *larcSize_PTR, void (*func)(scalarType*, const scalarType))
+size_t fprint_larcMatrixFile(int64_t m_pID, char *path)
 {
-  if (matrix_is_invalid(m_ptr)) {
-    fprintf(stderr,"%s: invalid matrix pointer passed\n", __func__);
-    return -1;
-  }
-
-  /* output_flags keeps track of which matrixIDs have already appeared */
-  if (output_flags[get_matID_from_matPTR(m_ptr)] > 0)
-    return 1;
-
-  output_flags[get_matID_from_matPTR(m_ptr)] = 1;
-  *larcSize_PTR +=1;
-  matrix_type_t mtype = matrix_type(m_ptr);
-
-  if (mtype == SCALAR)
+    if (m_pID == MATRIX_ID_INVALID)
     {
-      // in COMPLEX case, write routine to output "a+I*b" as "a, b"
-      scalarType *val = &scratchVars.submit_to_store;
-      // the function func() is applied to the scalar value in m_ptr, and
-      // the result put into val; if the function is sca_set, the stored value
-      // is merely copied
-      func(val, matrix_trace(m_ptr));
-      char *val_string = sca_get_str(*val);
-      fprintf(f, "    \"%ld\":[%d, %d, \"%s\"],\n", get_matID_from_matPTR(m_ptr), matrix_row_level(m_ptr), 
-              matrix_col_level(m_ptr), val_string);
-      free(val_string);
+        fprintf(stderr,"in %s, invalid matrixID passed\n",__func__);
+        return 0;
     }
-  else   // NONSCALAR
-    {
-      int ret;
+
+    int local_debug = 0;
+    if (local_debug) 
+        fprintf(stdout, "Inside %s, about to call create_usasPTR\n",__func__);
+
+    // create a uniq submatrix array structure (usas) for that matrix
+    usas_t *usasPTR = create_usasPTR(m_pID);
+    if (local_debug) 
+        fprintf(stdout, "Inside %s, about to call fill_usasPTR\n",__func__);
+    fill_usasPTR(usasPTR,m_pID);
+
+    int64_t matrixID = MID_FROM_PID(m_pID);
+
+    // if (VERBOSE >= DEBUG)
+    if (local_debug) 
+        fprintf(stdout, "About to load info store\n");
+
+    // load the info store with counts from the usas, Note: the format
+    // for matrixIDs limits the number of uniq submatrices to 2^50 < 10^20
+    char larcSize_str[20];
+    sprintf(larcSize_str,"%ld", usasPTR->larcSizeCounter);
+    char uniqScalarCount_str[20];
+    sprintf(uniqScalarCount_str,"%ld", usasPTR->numUniqScalars);
+    info_set(LARC_SIZE, m_pID, larcSize_str);
+    info_set(UNIQ_SCALARS, m_pID, uniqScalarCount_str);
+
+    // add meta data to the info store on compile time scalarType , width info
+    update_infoStore_automatic_entries(m_pID);
+
+    // the matID_map array is indexed by the matrixIDs found in the input file
+    // but contains the packedIDs assigned when added to the MatrixStore
+    int64_t *matID_map = (int64_t *) calloc(matrixID + 1, sizeof(int64_t));
      
-      mat_ptr_t panel[4];
-      for (int i = 0; i < 4; ++i) {
-        panel[i] = matrix_sub(m_ptr,i);
-      }
-
-      // obtain the pointers for the matrices in the panel
-      // For ROW_VECTORS, COL_VECTORS and MATRICES there is a panel[0]
-      ret = recursive_write_larcMatrix_file_return_larcSize_by_matPTR(panel[0], f, output_flags, larcSize_PTR, func);
-      if (ret < 0) return ret;
-
-      // For ROW_VECTORS, MATRICES there is a panel[1]
-      if (mtype!=COL_VECTOR) {
-        ret = recursive_write_larcMatrix_file_return_larcSize_by_matPTR(panel[1], f, output_flags, larcSize_PTR, func);
-        if (ret < 0) return ret;
-      }
-
-      // For COL_VECTORS, MATRICES there is a panel[2]
-      if (mtype!=ROW_VECTOR) {
-        ret = recursive_write_larcMatrix_file_return_larcSize_by_matPTR(panel[2], f, output_flags, larcSize_PTR, func);
-        if (ret < 0) return ret;
-      }
-
-      // For MATRICES there is a panel[3]
-      if (mtype==MATRIX) {
-        ret = recursive_write_larcMatrix_file_return_larcSize_by_matPTR(panel[3], f, output_flags, larcSize_PTR, func);   
-        if (ret < 0) return ret;
-      }
-
-      // print the panel, which contains matrixIDs for these matrices 
-      // For ROW_VECTORS, COL_VECTORS and MATRICES there is a panel[0]
-      fprintf(f, "    \"%ld\":[%d, %d, %ld, ", get_matID_from_matPTR(m_ptr), 
-                matrix_row_level(m_ptr), matrix_col_level(m_ptr),
-	        get_matID_from_matPTR(panel[0]));
-
-      // For ROW_VECTORS, MATRICES there is a panel[1]
-      // For COL_VECTORS print -1
-      if (mtype!=COL_VECTOR) {
-                fprintf(f, "%ld, ", get_matID_from_matPTR(panel[1]));
-      }
-      else { fprintf(f, "-1, "); }
-
-      // For COL_VECTORS, MATRICES there is a panel[2]
-      // For ROW_VECTORS print -1
-      if (mtype!=ROW_VECTOR) {
-                fprintf(f, "%ld, ", get_matID_from_matPTR(panel[2]));
-      }
-      else { fprintf(f, "-1, "); }
-
-      // For MATRICES there is a panel[3]
-      // For ROW_VECTORS or COL_VECTORS print -1
-      if (mtype==MATRIX) {
-                fprintf(f, "%ld],\n", get_matID_from_matPTR(panel[3]));
-      }
-      else { fprintf(f, "-1],\n"); }
-
-      //fprintf(f, "    \"%ld\":[%d, %d, %ld, %ld, %ld, %ld],\n", get_matID_from_matPTR(m_ptr), 
-      //      matrix_row_level(m_ptr),matrix_col_level(m_ptr),
-      //      get_matID_from_matPTR(panel[0]),get_matID_from_matPTR(panel[1]),
-      //      get_matID_from_matPTR(panel[2]),get_matID_from_matPTR(panel[3]));
+    // open a file to write into
+    FILE *f = fopen(path, "w");
+  
+    if (!f)
+    {
+        fprintf(stderr,"ERROR in %s, could not open %s for writing\n",
+            __func__,path);
+        return 0;
     }
-  return 1;
+
+    if (VERBOSE > BASIC)
+    {
+        fprintf(stdout,"\nWriting matrix with matrixID %" PRId64 " to %s\n",
+            matrixID, path);
+        fprintf(stdout,"The larcSize is %zd and numUniqScalars is %zd.\n",
+                 usasPTR->larcSizeCounter, usasPTR->numUniqScalars);
+    }
+  
+    // json file contains: matrixID_max, matid, info struct, table struct
+
+    // print the matrixID_max, and matid to the file
+    fprintf(f, "{\n  \"matrixID_max\":%" PRIu64 ",\n  \"matid\":%" PRIu64 ",",
+	  usasPTR->larcSizeCounter, usasPTR->larcSizeCounter-1);
+
+    // print the InfoStore to the file
+    int info_ret = write_infoStore_to_larcMatrix_file(m_pID, f);
+    if (info_ret != 0) {
+        fprintf(stderr,"ERROR in %s, failure in function\n",__func__);
+        fprintf(stderr,"\t write_infoStore_to_larcMatrix_file\n");
+    }
+
+    // print header for the table of submatrices contained in m
+    fprintf(f, "\n  \"table\":{\n");
+
+    // map_counter is the next matID that can be used in our downsized mapping
+    int64_t map_counter = 0;
+
+    // print every submatrix s of matrix m (including itself)
+    // this corresponds to everything where array value is 1 (for scalar)
+    // or 2 (for matrix)
+    //
+    // s is a matrixID not a packedID, and we will need to keep that in mind
+    for (int64_t s=0; s <= matrixID; ++s) {
+        // if the array value is zero then we don't do anything for this s
+        if (usasPTR->array[s] == 0) continue;
+
+	// map the value s to the smallest non-neg integer that we have not used yet
+	// then increment the map_counter
+	matID_map[s] = map_counter++;
+
+        if (usasPTR->array[s] == 1)
+        {
+             mats_ptr_t s_ptr =(mats_ptr_t)get_recordPTR_from_pID(
+                 PID_FROM_SCALAR_MID(s),"",__func__,0);
+             // in COMPLEX case, write routine to output "a+I*b" as "a, b"
+             char *val_string =sca_get_readable_approx_str(s_ptr->scalar_value);
+             fprintf(f, "    \"%" PRId64 "\":[0, 0, \"%s\"],\n",
+                 matID_map[s], val_string);
+             free(val_string);
+        } // end scalar branch
+        else   // NONSCALAR
+        {
+            matns_ptr_t s_ptr = (matns_ptr_t)get_recordPTR_from_pID(
+                PID_FROM_NONSCALAR_MID(s),"",__func__,0);
+
+            // print the panel, which contains matrixIDs for these matrices 
+            // For ROW_VECTORS, COL_VECTORS and MATRICES there is a panel[0]
+            fprintf(f, "    \"%" PRId64 "\":[%d, %d, %" PRId64 ", ",
+                matID_map[s], s_ptr->row_level, s_ptr->col_level,
+	        matID_map[MID_FROM_PID(s_ptr->subMatList[0])]);
+	
+            // For ROW_VECTORS, MATRICES there is a panel[1]
+            // For COL_VECTORS print -1
+            if (s_ptr->subMatList[1]!=MATRIX_ID_INVALID)
+                fprintf(f, "%" PRId64 ", ",
+	            matID_map[MID_FROM_PID(s_ptr->subMatList[1])]);
+            else { fprintf(f, "-1, "); }
+
+            // For COL_VECTORS, MATRICES there is a panel[2]
+            // For ROW_VECTORS print -1
+            if (s_ptr->subMatList[2]!=MATRIX_ID_INVALID)
+                fprintf(f, "%" PRId64 ", ",
+                    matID_map[MID_FROM_PID(s_ptr->subMatList[2])]);
+            else { fprintf(f, "-1, "); }
+	
+            // For MATRICES there is a panel[3]
+            // For ROW_VECTORS or COL_VECTORS print -1
+            if (s_ptr->subMatList[3]!=MATRIX_ID_INVALID)
+                fprintf(f, "%" PRId64 "],\n",
+                    matID_map[MID_FROM_PID(s_ptr->subMatList[3])]);
+            else { fprintf(f, "-1],\n"); }
+        } // end nonscalar branch
+    }  // end usasPTR->array loop
+
+    // end the table structure and the json file
+    fprintf(f, "      \"end\":0 }\n}\n");
+    fclose(f);
+
+    if (VERBOSE>SILENT) printf("wrote file %s\n",path);
+
+    // grab the larcSize then free the usas
+    size_t larcSize = usasPTR->larcSizeCounter;
+    free_usasPTR(usasPTR);
+    free(matID_map);
+
+    return(larcSize);
 }
 
 
-
-size_t write_larcMatrix_file_return_larcSize(mat_ptr_t m_ptr, char *path,
-        void (*func)(scalarType*, const scalarType))
+size_t fprint_uniqScalar_file(int64_t m_pID, char *path)
 {
-// return zero if no file is written for whatever reason
-/* output_flags keeps track of which matrixIDs have already appeared */
 
-  int verbose = 0;
+#ifndef IS_COMPLEX
+    fprintf(stderr,"The routine %s is only usable for complex types\n",__func__);
+    return(0);
+#endif    
+
+    if (m_pID == MATRIX_ID_INVALID)
+    {
+        fprintf(stderr,"in %s, invalid matrixID passed\n",__func__);
+        return 0;
+    }
+
+    int64_t matrixID = MID_FROM_PID(m_pID);
+     
+    int local_debug = 0;
+    if (local_debug) 
+          fprintf(stdout, "Inside %s, about to call create_usasPTR\n",__func__);
+
+    // create a uniq submatrix array structure (usas) for that matrix
+    usas_t *usasPTR = create_usasPTR(m_pID);
+    fill_usasPTR(usasPTR,m_pID);
+
+     // open a file to write into
+     FILE *f = fopen(path, "w");
   
-  FILE *f = fopen(path, "w");
-
-  size_t larcSize = 0;
-
-  if (!f)
+     if (!f)
     {
         fprintf(stderr,"ERROR in %s, could not open %s for writing\n",__func__,path);
         return 0;
     }
-  if (matrix_is_invalid(m_ptr)) 
-    {
-        fprintf(stderr,"ERROR in %s, passed matrix pointer is invalid\n",__func__);
-        return 0;
+
+     if (VERBOSE > BASIC) {
+         fprintf(stdout,"\nWriting matrix with matrixID %" PRId64 " to %s\n",
+               matrixID, path);
+         fprintf(stdout,"The larcSize is %zd and numUniqScalars is %zd.\n",
+                 usasPTR->larcSizeCounter, usasPTR->numUniqScalars);
     }
-  char *output_flags = calloc(num_matrices_created(), sizeof(char));
-  if (output_flags == NULL) {
-    ALLOCFAIL();
-  }
 
-  if (!output_flags)  {
-        fprintf(stderr,"ERROR in %s, unable to allocate space.\n",__func__);
-        return 0;
-  }
+    for (int64_t s=0; s <= matrixID;s++) {
+         // if the array value is zero then this matID is not in top matrix
+         // if the array value is two then this matID is not for a scalar submatrix
+         if (usasPTR->array[s] != 1)  continue;
 
-  if (verbose) {
-      printf("\nWriting %d,%d-level matrix with matrixID %" PRId64 " to %s\n", 
-	     matrix_row_level(m_ptr), matrix_col_level(m_ptr),
-	     get_matID_from_matPTR(m_ptr), path);
-    }
-  
-  // printf("      the matrix id is %lu, with level %d %d\n",id, matrix_row_level(m_ptr), matrix_col_level(m_ptr));
+	 // now we are only in the case where s corresponds to a scalar
 
-  // fprintf(f, "{\n  \"matrixID_max\":%" PRIu64 ",\n  \"matid\":%" PRIu64 ",\n  \"table\":{\n", num_matrices_created(), get_matID_from_matPTR(m_ptr));
+	    // TODO: eventually write scalars.c code to do 
+	    //  char *val_string = sca_get_column_format_str(s_ptr->scalar_value);
+            //  fprintf(f, "%s\n", val_string);
+	    //  free(val_string);
+	    // CAN COMPARE TO non col format
+            // char *val_string = sca_get_readable_approx_str(s_ptr->scalar_value);
+	    //  fprintf(f, "%s\n", val_string);
+	    //  free(val_string);
+           #ifdef USE_COMPLEX	    
+                 mats_ptr_t s_ptr = (mats_ptr_t)get_recordPTR_from_pID(
+                      PID_FROM_SCALAR_MID(s),"",__func__,0);
+                 long double real_part =  creall(s_ptr->scalar_value);
+		 long double imag_part =  cimagl(s_ptr->scalar_value);
+		 fprintf(f, "%Lg %Lg\n",real_part,imag_part);
+           #else	   //  not a handled type
+	          fprintf(stderr,"This code only works for type COMPLEX\n");
+	          exit(0);
+           #endif   // finished cases
 
-
-  // json file contains: matriID_max, matid, optional info struct, table struct
-  fprintf(f, "{\n  \"matrixID_max\":%" PRIu64 ",\n  \"matid\":%" PRIu64 ",",
-	  num_matrices_created(), get_matID_from_matPTR(m_ptr));
-
-  // the info structure is printed when it contains information
-
-  // TODO
-  //    * retrieve the larcSize from infoStore if it exists
-  //    * after writing the the recursive file, we have calculated a larcSize
-  //    * check to see if these are the same
-  //    * enter the new larcSize into the matrix store
-  //    * insert the larcSize either at the end of the larcFile or at the beginning.
-  int info_ret = write_infoStore_to_larcMatrix_file(m_ptr, f);
-  if (info_ret != 0) {
-    fprintf(stderr,"ERROR in %s, failure in function\n",__func__);
-    fprintf(stderr,"\t write_infoStore_to_larcMatrix_file\n");
-  }
-
-  int recur_ret;
-  // always print the matrix table recursively
-  fprintf(f, "\n  \"table\":{\n"); 
-  recur_ret = recursive_write_larcMatrix_file_return_larcSize_by_matPTR(
-	                           m_ptr, f, output_flags, &larcSize, func);
-  if (recur_ret == -1) {
-    fprintf(stderr,"ERROR in %s, failure at some level of recursive function\n",__func__);
-    fprintf(stderr,"\t recursive_write_larcMatrix_file_return_larcSize_by_matPTR\n");
-  }
-    
-  free (output_flags);
-
-  // print out the larcSize
-  if (verbose) {
-    fprintf(stdout,"The larcSize is %zd for the larcMatrix in file %s.\n",larcSize,path);
-  }
-
-  // end the table structure and the json file
-  fprintf(f, "      \"end\":0 }\n}");
+  }  // end usasPTR->array loop
   fclose(f);
 
-  return larcSize;
-}
-
-
-size_t write_larcMatrix_file_return_larcSize_by_matID(int64_t m_mID, char *path)
-{
-  // get the matrix pointer from the matrixID, and see if still in store 
-  mat_ptr_t m_ptr = get_matPTR_from_matID(m_mID, "", __func__,0);
-  if (m_ptr == MATRIX_PTR_INVALID) { exit(1); }
-
-  // calculate matrix pointer version of function
+     // create a new path with .info at the end.
+     char info_path[300];
+     sprintf(info_path,"%s.info",path);
   
-  return write_larcMatrix_file_return_larcSize_by_matPTR(m_ptr, path);
+     // open a file to write into
+     FILE *f_info = fopen(info_path, "w");
+  
+     if (!f_info)
+    {
+        fprintf(stderr,"ERROR in %s, could not open %s for writing\n",__func__,info_path);
+        return 0;
+    }
+
+     if (VERBOSE > BASIC) {
+         fprintf(stdout,"\nWriting associated infostore metadata to %s\n", info_path);
+    }
+
+     // if (VERBOSE >= DEBUG)
+     if (local_debug)    fprintf(stdout, "About to load info store\n");
+     // load the info store with counts from the usas, Note: the format
+     // for matrixIDs limits the number of uniq submatrices to 2^50 < 10^20
+     char larcSize_str[20];
+     sprintf(larcSize_str,"%ld",usasPTR->larcSizeCounter);
+     char uniqScalarCount_str[20];
+     sprintf(uniqScalarCount_str,"%ld",usasPTR->numUniqScalars);
+     info_set(LARC_SIZE, m_pID,larcSize_str);
+     info_set(UNIQ_SCALARS, m_pID,uniqScalarCount_str);
+
+     // add meta data to the info store on compile time scalarType , width info
+     update_infoStore_automatic_entries(m_pID);
+
+    // 
+    fprintf(f_info,"The scalar file can be sorted using unix: 'sort -k1g -k2g'\n");
+    fprintf(f_info,"Here is the associated metadata from the InfoStore:\n");
+
+     
+     
+    // print the InfoStore to the file
+    int info_ret = write_infoStore_to_larcMatrix_file(m_pID, f_info);
+    if (info_ret != 0) {
+        fprintf(stderr,"ERROR in %s, failure in function\n",__func__);
+        fprintf(stderr,"\t write_infoStore_to_larcMatrix_file\n");
+    }
+    fclose(f_info);
+
+     // Save off the number of unique scalars and then free the usas
+     size_t nus = usasPTR->numUniqScalars;
+     free_usasPTR(usasPTR);
+
+     return(nus);
 }
-
-size_t write_larcMatrix_file_return_larcSize_by_matPTR(mat_ptr_t m_ptr, char *path)
-{
-    // the function sca_set as the last argument ensures the written data
-    // is the same as that in the matrixStore
-    return write_larcMatrix_file_return_larcSize(m_ptr, path, sca_set);
-}
-
-

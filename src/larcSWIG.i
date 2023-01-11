@@ -13,6 +13,7 @@
  *   - Steve Cuccaro (IDA-CCS)                                    *
  *   - John Daly (LPS)                                            *
  *   - John Gilbert (UCSB, IDA adjunct)                           *
+ *   - Mark Pleszkoch (IDA-CCS)                                   *
  *   - Jenny Zito (IDA-CCS)                                       *
  *                                                                *
  * Additional contributors are listed in "LARCcontributors".      *
@@ -57,19 +58,15 @@
   memory and are declared in headers in this .i file. This is how you
   tell SWIG it's ok for the wrapper functions to free the memory.
 */
-%newobject count_entries_larcMatrixFile;              /* experimental.h */
 %newobject info_get;                                  /* info_store.h */
 %newobject create_log_dir;                            /* larc.h */
 %newobject sca_get_str;                               /* larc.h */
-%newobject matrix_maxnorm_matrixID;                   /* matmath.h */
-%newobject matrix_l2norm_matrixID;                    /* matmath.h */
-%newobject matrix_tracenorm_matrixID;                 /* matmath.h */
-%newobject matrix_trace_from_matrixID;                /* matmath.h */
-%newobject scalar_string_from_matrixID;               /* matmath.h */
-%newobject matrix_count_entries_matrixID;             /* matmath.h */
-%newobject matrix_list_scalars_larcMatrix;            /* matmath.h */
-%newobject get_valString_from_matID_and_coords;       /* matrix_store.h */
-%newobject matrix_trace_matrixID;                     /* matrix_store.h */
+%newobject tracenorm;                                 /* matmath.h */
+%newobject trace;                                     /* matmath.h */
+%newobject get_scalar_value_string;                   /* matmath.h */
+%newobject matrix_count_entries;                      /* matmath.h */
+%newobject get_list_of_scalars_in_larcMatrixFile;     /* matmath.h */
+%newobject get_readableString_scalar_from_pID_and_coords;/* matrix_store.h */
 /* 
   The following functions return char * (string) type, but not from
   malloc'd memory, so SWIG should not try to free it!
@@ -97,7 +94,7 @@ logging.c: get_current_dir_name (this is a unistd.h function)
 #include "fft.h"
 #include "hash.h"
 #include "scalars.h"
-#include "experimental.h"
+#include "exampleLARC.h"
 #include <complex.h>
 #include <gmp.h>
 #include <pthread.h>
@@ -196,7 +193,7 @@ logging.c: get_current_dir_name (this is a unistd.h function)
 %include "hash.h"
 %include "scalars.h"
 %include "info_store.h"
-%include "experimental.h"
+%include "exampleLARC.h"
 
 %array_class(int, intArray);
 %array_class(long int, int64Array); // # works because SWIGWORDSIZE64 defined

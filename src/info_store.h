@@ -13,6 +13,7 @@
  *   - Steve Cuccaro (IDA-CCS)                                    *
  *   - John Daly (LPS)                                            *
  *   - John Gilbert (UCSB, IDA adjunct)                           *
+ *   - Mark Pleszkoch (IDA-CCS)                                   *
  *   - Jenny Zito (IDA-CCS)                                       *
  *                                                                *
  * Additional contributors are listed in "LARCcontributors".      *
@@ -59,21 +60,32 @@
 #include <stdint.h>
 #include "larc.h"
 
+/*
+ * \ingroup larc
+ * \brief Generates a hash value based on an input packedID and an info_type_t value
+ * \param pID A packedID
+ * \param info_type An enum value indicating the type of metadata stored
+ * \return The hash value
+ */
+uint64_t
+hash_from_info(int64_t pID, info_type_t info_type);
 
-/* lists out all the info_names and description of them 
-   to help users interface with info chain functions  */
 /*!
  * \ingroup larc
  * \brief Print out the names understood by the info store
+ *
+ * lists out all the info_names and description of them 
+ * to help users interface with info chain functions 
  */
 void list_info_names();
 
-// This function returns the name associated with enum info_type value
 /*!
  * \ingroup larc
  * \brief Outputs the name associated to an enum info_type value
  * \param info_type An enum value 
  * \return A string containing the name of the enum value
+ *
+ * This function returns the name associated with enum info_type value
  */
 
 char *return_info_name(uint64_t info_type);
@@ -81,7 +93,6 @@ char *return_info_name(uint64_t info_type);
 // return an array of the info_names to the user
 // char** info_names_array();
 
-/* Prints a summary of info_store usage */
 /*!
  * \ingroup larc
  * \brief Prints out information about the info store
@@ -89,6 +100,7 @@ char *return_info_name(uint64_t info_type);
  */
 void info_store_report(char *outfilepath);
 
+#ifndef SWIG
 /*!
  * \ingroup larc
  * \brief Creates the LARC infoStore
@@ -99,32 +111,32 @@ int create_info_store(size_t exponent);
 
 /*!
  * \ingroup larc
- * \brief Returns a pointer to the struct indicated by the two inputs (if create_flag is 1, creates the structure)
- * \param info_type An enum value indicating the type of metadata stored
- * \param matID A matrixID
- * \param create_flag If set to 1 and the data is not found in the infoStore, a record is created and put into the Store
- * \return A pointer to the larc_info_t structure
+ * \brief Frees memory allocated to LARC's infoStore
+ *
+ * This routine is called by shutdown_larc. It should not be called by
+ * any other routine.
  */
-struct larc_info_t *info_find(info_type_t info_type, int64_t matID, int create_flag);
+void free_info_store(void);
+#endif // #ifndef SWIG
 
 /*!
  * \ingroup larc
  * \brief Creates a new larc_info_t record and fills it with the variables passed to this function
  * \param info_type The type of metadata to be stored
- * \param my_matID The matrixID to be stored
+ * \param my_pID The packedID to be stored
  * \param info_data Metadata about the matrix
  * \return 0 on success, or error code if failed 
  */
-int info_set(info_type_t info_type, int64_t my_matID, const char *info_data);
+int info_set(info_type_t info_type, int64_t my_pID, const char *info_data);
 
 /*!
  * \ingroup larc
  * \brief Finds any stored metadata of a particular type about a matrix
  * \param info_type The type of metadata
- * \param my_matID The matrix of interest
+ * \param my_pID The matrix of interest
  * \return A string containing the metadata
  */
-char *info_get(info_type_t info_type, int64_t my_matID);
+char *info_get(info_type_t info_type, int64_t my_pID);
 
 /*!
  * \ingroup larc
@@ -136,12 +148,12 @@ info_type_t get_info_type_from_string_name(const char *info_name);
 
 /*!
  * \ingroup larc
- * \brief Returns the hash value associated to a matrixID and the type of metadata to be stored
- * \param my_matID The matrixID
+ * \brief Returns the hash value associated to a packedID and the type of metadata to be stored
+ * \param my_pID The packedID
  * \param info_name The type of metadata to be stored
  * \return The hashID value associated with the info record 
  */
-int64_t info_hashID_by_matrixIDs(int64_t my_matID, const char *info_name);
+int64_t get_info_hash(int64_t my_pID, const char *info_name);
 
 /*!
  * \ingroup larc
@@ -151,25 +163,23 @@ int64_t info_hashID_by_matrixIDs(int64_t my_matID, const char *info_name);
  * \param comment A string that the user can have printed to that file
  * \return 1 on success
  */
-int info_hash_chain_info_to_file(uint64_t hash, char *outfilepath, char *comment);
+int fprint_info_from_hash_chain(uint64_t hash, char *outfilepath, char *comment);
 
-// prints a hash chain from the infostore to screen.
 /*!
  * \ingroup larc
- * \brief Same as info_hash_chain_info_to_file except that the print is to stdout
+ * \brief Same as fprint_info_from_hash_chain except that the print is to stdout
  * \param hash The hash value for an infoStore hash chain
  * \param comment A string that the user can have printed to stdout
  * \return 1 on success
  */
-int info_hash_chain_info_to_screen(uint64_t hash, char *comment);
+int print_info_from_hash_chain(uint64_t hash, char *comment);
 
-// Cleans a hash chain in the info store for a given hash
-/*
+/*!
  * \ingroup larc
  * \brief Cleans a hash chain in the info store
  * \param hashID The hash specifing the hash chain to be cleaned
  * \return 1 on success
  */
-int clean_info_hash_chain(uint64_t hashID);
+int clean_info_store_hash_chain(uint64_t hashID);
 
 #endif

@@ -14,6 +14,7 @@ Authors:
   - Steve Cuccaro (IDA-CCS)                                   
   - John Daly (LPS)                                           
   - John Gilbert (UCSB, IDA adjunct)                          
+  - Mark Pleszkoch (IDA-CCS)                                  
   - Jenny Zito (IDA-CCS)                                      
 Additional contributors are listed in "LARCcontributors".     
                                                               
@@ -71,6 +72,7 @@ and Andy Wills.
 Thank you!   
 
   -- Steve Cuccaro, John Daly, John Gilbert, and Jenny Zito (2017).
+ *   - Mark Pleszkoch (IDA-CCS)                                   *
 
 */
 

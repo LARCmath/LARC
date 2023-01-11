@@ -3,7 +3,7 @@
 # NOTE: to run on command line
 #   python3 -m unittest -v test_unittest_matrix_store
 
- ##################################################################
+ #*################################################################
  #                                                                #
  # Copyright (C) 2014, Institute for Defense Analyses             #
  # 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           #
@@ -16,6 +16,7 @@
  #   - Steve Cuccaro (IDA-CCS)                                    #
  #   - John Daly (LPS)                                            #
  #   - John Gilbert (UCSB, IDA adjunct)                           #
+ #   - Mark Pleszkoch (IDA-CCS)                                   #
  #   - Jenny Zito (IDA-CCS)                                       #
  #                                                                #
  # Additional contributors are listed in "LARCcontributors".      #
@@ -53,7 +54,7 @@
  # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, #
  # EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.             #
  #                                                                #
- ##################################################################
+ #*################################################################
 
 from __future__ import print_function
 
@@ -74,15 +75,15 @@ class TestOpStoreCleaning(unittest.TestCase):
         self.level = 3
         self.val_range = [-100, 100]
         self.sparsity = 0.5
-        # with pylarc.stdout_redirected():
+        # with stdout_redirected():
         #    initialize_larc(26,24,10,-1,-1,1)
         initialize_larc(26,24,10,-1,-1,0)    # this should have run quiet effect
-        self.randMatAID = pylarc.matrix_random_matrixID(self.scalarType, self.level, self.level, self.val_range[0], self.val_range[1], self.sparsity)
-        self.randMatBID = pylarc.matrix_random_matrixID(self.scalarType, self.level, self.level, self.val_range[0], self.val_range[1], self.sparsity)
+        self.randMatAID = matrix_random_matrixID(self.scalarType, self.level, self.level, self.val_range[0], self.val_range[1], self.sparsity)
+        self.randMatBID = matrix_random_matrixID(self.scalarType, self.level, self.level, self.val_range[0], self.val_range[1], self.sparsity)
         op_store_report("stdout");
-        self.prodMatABID = matrix_mult_matrixID(self.randMatAID, self.randMatBID)
-        self.sumMatABID  = matrix_add_matrixID(self.randMatAID, self.randMatBID)
-        self.sumMatAAID  = matrix_add_matrixID(self.randMatAID, self.randMatAID)
+        self.prodMatABID = matrix_mult(self.randMatAID, self.randMatBID)
+        self.sumMatABID  = matrix_add(self.randMatAID, self.randMatBID)
+        self.sumMatAAID  = matrix_add(self.randMatAID, self.randMatAID)
 
     @unittest.skip("hide") 
     def test_clean_ops_no_need(self):
@@ -104,7 +105,7 @@ class TestOpStoreCleaning(unittest.TestCase):
         but no multiplications. 
         """
         op_store_report("stdout");
-        remove_matrix_from_mat_store_by_matrixID(self.randMatBID)
+        remove_matrix_from_store(self.randMatBID)
         clean_op_store();
         op_store_report("stdout");
         empty_op_store();
@@ -118,7 +119,7 @@ class TestOpStoreCleaning(unittest.TestCase):
         but no multiplications. 
         """
         op_store_report("stdout");
-        clean_matrix_store();
+        clean_matrix_storage();
         clean_op_store();
         op_store_report("stdout");
         empty_op_store();
@@ -135,9 +136,9 @@ class TestOpStoreCleaning(unittest.TestCase):
         empty_op_store();
         op_store_report("stdout");
         # now we need to recalculate these
-        self.prodMatABID = matrix_mult_matrixID(self.randMatAID, self.randMatBID)
-        self.sumMatABID  = matrix_add_matrixID(self.randMatAID, self.randMatBID)
-        self.sumMatAAID  = matrix_add_matrixID(self.randMatAID, self.randMatAID)
+        self.prodMatABID = matrix_mult(self.randMatAID, self.randMatBID)
+        self.sumMatABID  = matrix_add(self.randMatAID, self.randMatBID)
+        self.sumMatAAID  = matrix_add(self.randMatAID, self.randMatAID)
         # note that there are now (KRO +-19) twice as many records created 
         # as current records since we recreated them all. 
         op_store_report("stdout");

@@ -12,6 +12,7 @@
  *   - Steve Cuccaro (IDA-CCS)                                    *
  *   - John Daly (LPS)                                            *
  *   - John Gilbert (UCSB, IDA adjunct)                           *
+ *   - Mark Pleszkoch (IDA-CCS)                                   *
  *   - Jenny Zito (IDA-CCS)                                       *
  *                                                                *
  * Additional contributors are listed in "LARCcontributors".      *
@@ -54,8 +55,8 @@
 #ifndef VERSION_H
 #define VERSION_H
 
-#define MAJOR_VERSION 1
-#define MINOR_VERSION 0
+#define MAJOR_VERSION 2
+#define MINOR_VERSION 1
 #define PATCH_VERSION 0
 
 #endif

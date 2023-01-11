@@ -1,5 +1,5 @@
 #        exampleLARC.py
-##################################################################
+#*################################################################
 #                                                                #
 # Copyright (C) 2014, Institute for Defense Analyses             #
 # 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           #
@@ -12,6 +12,7 @@
 #   - Steve Cuccaro (IDA-CCS)                                    #
 #   - John Daly (LPS)                                            #
 #   - John Gilbert (UCSB, IDA adjunct)                           #
+#   - Mark Pleszkoch (IDA-CCS)                                   #
 #   - Jenny Zito (IDA-CCS)                                       #
 #                                                                #
 # Additional contributors are listed in "LARCcontributors".      #
@@ -49,7 +50,7 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, #
 # EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.             #
 #                                                                #
-##################################################################
+#*################################################################
 
 from __future__ import print_function
 
@@ -89,39 +90,44 @@ else: # in case we define another type
         x = 2**25
         more = [x, 2**100, 2**50, 2**75]
 
-myFirstMatID = pylarc.row_major_list_to_store_matrixID(list(map(str, more)), 1, 1, 2)
+myFirstMatID = pylarc.row_major_list_to_store(list(map(str, more)), 1, 1, 2)
 print("my first matrix is")
-pylarc.print_naive_by_matID(myFirstMatID)
+pylarc.print_naive(myFirstMatID)
 
 print("\nentry squared and then multiplied by 10 is")
-squareID = pylarc.matrix_entrySquared_matrixID(myFirstMatID, "10")
-pylarc.print_naive_by_matID(squareID)
+squareID = pylarc.matrix_entrySquared(myFirstMatID, "10")
+pylarc.print_naive(squareID)
 
 myfile = "../tests/dat/out/temp_"+typeChar+"_matrix.json"
 print(myfile)
 
-pylarc.write_larcMatrix_file_by_matID(squareID, myfile)
+pylarc.fprint_larcMatrixFile(squareID, myfile)
+
+print("\n entry squared done a different way (no factor of 10):")
+sqID2 = pylarc.square_matrix_elements(myFirstMatID,pylarc.FUNC_A)
+pylarc.print_naive(sqID2)
+print("")
 
 
 # lets look at the result of building an identity and zero matrix 
 # from scratch using the row major reader and print
 vals = [0 for i in range(64)]
 vals_string = pylarc.map_to_str(vals, "Integer")
-zeroID_3_3 = pylarc.row_major_list_to_store_matrixID(vals_string,3,3,8)
+zeroID_3_3 = pylarc.row_major_list_to_store(vals_string,3,3,8)
 print("The 8 by 8 Zero matrix is")
-pylarc.print_naive_by_matID(zeroID_3_3)
+pylarc.print_naive(zeroID_3_3)
 
 vals = [1*(0==(i%9)) for i in range(64)]
 vals_string = pylarc.map_to_str(vals, "Integer")
-identityID_3 = pylarc.row_major_list_to_store_matrixID(vals_string,3,3,8)
+identityID_3 = pylarc.row_major_list_to_store(vals_string,3,3,8)
 print("The 8 by 8 identity matrix is")
-pylarc.print_naive_by_matID(identityID_3)
+pylarc.print_naive(identityID_3)
 
 # Usually one would grab the matrixID's for the zero and
 # identity matrices from the preloaded matrix store, using
 # the internal faster C code as follows.
-normalway_zeroID_3_3 = pylarc.get_zero_matrixID(3,3)
-normalway_identityID_3 = pylarc.get_identity_matrixID(3)
+normalway_zeroID_3_3 = pylarc.get_zero_pID(3,3)
+normalway_identityID_3 = pylarc.get_identity_pID(3)
 
 # We verify these two methods produced the same matrices
 if (normalway_zeroID_3_3 == zeroID_3_3):
@@ -140,10 +146,10 @@ else:
         print("Something is horribly wrong, identity matrix built with row major read")
         print("is not equal to identity matrix retrieved by standard C routine.")
 
-pylarc.clean_matrix_store()
+pylarc.clean_matrix_storage()
 
-v2ID = pylarc.read_larcMatrix_file_return_matID(myfile)
-pylarc.print_naive_by_matID(v2ID)
+v2ID = pylarc.read_larcMatrixFile(myfile)
+pylarc.print_naive(v2ID)
 
 
 

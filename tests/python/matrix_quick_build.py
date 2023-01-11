@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
- ##################################################################
+ #*################################################################
  #                                                                #
  # Copyright (C) 2014, Institute for Defense Analyses             #
  # 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           #
@@ -13,6 +13,7 @@
  #   - Steve Cuccaro (IDA-CCS)                                    #
  #   - John Daly (LPS)                                            #
  #   - John Gilbert (UCSB, IDA adjunct)                           #
+ #   - Mark Pleszkoch (IDA-CCS)                                   #
  #   - Jenny Zito (IDA-CCS)                                       #
  #                                                                #
  # Additional contributors are listed in "LARCcontributors".      #
@@ -50,7 +51,7 @@
  # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, #
  # EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.             #
  #                                                                #
- ##################################################################
+ #*################################################################
 
 from __future__ import print_function
 
@@ -129,16 +130,16 @@ def matrix_random_matrixID(scalar_type, row_level, col_level, range_start, range
         randVals = [rand_f(range_start, range_stop) for i in range(n)]
     #convert list to a matrix and add to store
     try:
-        randMat_ID = row_major_list_to_store_matrixID(pylarc.map_to_str(randVals, scalarTypeStr), row_level, col_level, 2**col_level)
+        randMat_ID = row_major_list_to_store(pylarc.map_to_str(randVals, scalarTypeStr), row_level, col_level, 2**col_level)
     except TypeError:
         raise TypeError("argument 1 of type 'ScalarType'")
 
     #return matrix id
     return randMat_ID
 
-## If you want a zero matrix, there is a routine in matrix_store.c for that
-## int64_t get_zero_matrixID(mat_level_t row_level, mat_level_t col_level);
-## Don't use the old code from Andy for matrix_zero_matrixID.
+# If you want a zero matrix, there is a routine in matrix_store.c for that
+# int64_t get_zero_pID(mat_level_t row_level, mat_level_t col_level);
+# Don't use the old code from Andy for matrix_zero_matrixID.
 
 # def matrix_zero_matrixID(row_level, col_level):
 #     """
@@ -148,16 +149,16 @@ def matrix_random_matrixID(scalar_type, row_level, col_level, range_start, range
 #     vals = [0 for i in range(n)]
 
 #     try: 
-#         zeroMat_ID = row_major_list_to_store_matrixID(pylarc.map_to_str(vals, scalarTypeStr), row_level, col_level, 2**col_level)
+#         zeroMat_ID = row_major_list_to_store(pylarc.map_to_str(vals, scalarTypeStr), row_level, col_level, 2**col_level)
 #     except TypeError:
 #         raise TypeError("argument 1 of type `ScalarType'")
 
 #     return zeroMat_ID
 
 
-## If you want an identity  matrix, there is a routine in matrix_store.c for that
-## int64_t get_identity_matrixID(mat_level_t level);
-## Don't use the old code from Andy for matrix_identity_matrixID.
+# If you want an identity  matrix, there is a routine in matrix_store.c for that
+# int64_t get_identity_pID(mat_level_t level);
+# Don't use the old code from Andy for matrix_identity_matrixID.
 
 # def matrix_identity_matrixID(level):
 #     """
@@ -167,7 +168,7 @@ def matrix_random_matrixID(scalar_type, row_level, col_level, range_start, range
 #     vals = [1*(0==(i%(2**level+1))) for i in range(n)]
 
 #     try:
-#         idMat_ID = row_major_list_to_store_matrixID(pylarc.map_to_str(vals, scalarTypeStr), level, level, 2**level)
+#         idMat_ID = row_major_list_to_store(pylarc.map_to_str(vals, scalarTypeStr), level, level, 2**level)
 #     except TypeError:
 #         raise TypeError("argument 1 of type 'ScalarType'")
 

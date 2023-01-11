@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
- ##################################################################
+ #*################################################################
  #                                                                #
  # Copyright (C) 2014, Institute for Defense Analyses             #
  # 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           #
@@ -13,6 +13,7 @@
  #   - Steve Cuccaro (IDA-CCS)                                    #
  #   - John Daly (LPS)                                            #
  #   - John Gilbert (UCSB, IDA adjunct)                           #
+ #   - Mark Pleszkoch (IDA-CCS)                                   #
  #   - Jenny Zito (IDA-CCS)                                       #
  #                                                                #
  # Additional contributors are listed in "LARCcontributors".      #
@@ -50,7 +51,7 @@
  # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, #
  # EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.             #
  #                                                                #
- ##################################################################
+ #*################################################################
 
 from __future__ import print_function
 
@@ -73,67 +74,59 @@ import unittest
 
 class TestLARCmath(unittest.TestCase):
     def testAdd(self):
-        ### SCALAR ADDITION ###
+        #*# SCALAR ADDITION #*#
         # 0 + 0 = 0
-        self.assertEqual(matrix_add_matrixID(cvar.matID_scalar0,cvar.matID_scalar0), cvar.matID_scalar0) 
+        self.assertEqual(matrix_add(cvar.packedID_scalar0,cvar.packedID_scalar0), cvar.packedID_scalar0) 
         
         # 1 + 0 = 1
-        self.assertEqual(matrix_add_matrixID(cvar.matID_scalar1, cvar.matID_scalar0), cvar.matID_scalar1)
+        self.assertEqual(matrix_add(cvar.packedID_scalar1, cvar.packedID_scalar0), cvar.packedID_scalar1)
         
         # 0 + 1 = 1
-        self.assertEqual(matrix_add_matrixID(cvar.matID_scalar0, cvar.matID_scalar1), cvar.matID_scalar1)
+        self.assertEqual(matrix_add(cvar.packedID_scalar0, cvar.packedID_scalar1), cvar.packedID_scalar1)
         
         # 1 + 0 = 0 + 1
-        self.assertEqual(matrix_add_matrixID(cvar.matID_scalar1, cvar.matID_scalar0), matrix_add_matrixID(cvar.matID_scalar0, cvar.matID_scalar1))
+        self.assertEqual(matrix_add(cvar.packedID_scalar1, cvar.packedID_scalar0), matrix_add(cvar.packedID_scalar0, cvar.packedID_scalar1))
         
         # 1 + 1 = 2
         #constructing scalar 2 and adding it to the matrix store
-# NOTE: the following has been replaced, partly because it's overly complicated,
-# mostly because it assumes Complex type 
-        # a = np.matrix([[2+0j]])
-        # alist = a.reshape(-1).tolist()[0]
-        # arr = buildComplexArray(alist)
-        # level = 0
-        # dim = 2**level
-        # aser = row_major_list_to_store_matrixID(arr, level, level, dim)
         aser = get_valID_from_valString("2")
         
-        self.assertEqual(matrix_add_matrixID(cvar.matID_scalar1, cvar.matID_scalar1), aser)
+        self.assertEqual(matrix_add(cvar.packedID_scalar1, cvar.packedID_scalar1), aser)
         
-        ### SQUARE MATRIX ADDITION ###
+        #*# SQUARE MATRIX ADDITION #*#
         # check that error is thrown when dimensions do not match;
         # (would need to implement Python functionality to throw exception)
         # e.g. self.assertRaises(exception, callable, args, keywords)
         
         # 4x4 identity matrix + 4x4 zero matrix = 4x4 identity matrix
-        self.assertEqual(matrix_add_matrixID(I2_matrixID, Z2_matrixID), I2_matrixID)
+        self.assertEqual(matrix_add(I2_matrixID, Z2_matrixID), I2_matrixID)
         
         
-        ### NON-SQUARE MATRIX ADDITION ###
+        #*# NON-SQUARE MATRIX ADDITION #*#
         # check that error is thrown when dimensions do not match
 
 
     def testScalarMult(self):
         # test scalar multiplication
         # 0 * 0
-        self.assertEqual(scalar_mult_matrixID(cvar.matID_scalar0,cvar.matID_scalar0), cvar.matID_scalar0) 
+        self.assertEqual(scalar_mult(cvar.packedID_scalar0,cvar.packedID_scalar0), cvar.packedID_scalar0) 
 		
         # 1 * 0 = 0
-        self.assertEqual(scalar_mult_matrixID(cvar.matID_scalar1, cvar.matID_scalar0), cvar.matID_scalar0)
+        self.assertEqual(scalar_mult(cvar.packedID_scalar1, cvar.packedID_scalar0), cvar.packedID_scalar0)
 		
         # 1 * 1 = 1
-        self.assertEqual(scalar_mult_matrixID(cvar.matID_scalar1, cvar.matID_scalar1), cvar.matID_scalar1)
+        self.assertEqual(scalar_mult(cvar.packedID_scalar1, cvar.packedID_scalar1), cvar.packedID_scalar1)
         
         # 0 * 4x4 identity matrix = 4x4 0 matrix
-        self.assertEqual(scalar_mult_matrixID(cvar.matID_scalar0,I2_matrixID), Z2_matrixID)
+        self.assertEqual(scalar_mult(cvar.packedID_scalar0,I2_matrixID), Z2_matrixID)
 		
         # 1 * 4x4 identity matrix = 4x4 identity matrix
-        self.assertEqual(scalar_mult_matrixID(cvar.matID_scalar1,I2_matrixID), I2_matrixID)
+        self.assertEqual(scalar_mult(cvar.packedID_scalar1,I2_matrixID), I2_matrixID)
 		
     def testMult(self):
         # test matrix multiplication
         # 4x4 identity matrix * 4x4 identity matrix = 4x4 identity matrix
-        self.assertEqual(matrix_mult_matrixID(I2_matrixID,I2_matrixID), I2_matrixID) 	
+        self.assertEqual(matrix_mult(I2_matrixID,I2_matrixID), I2_matrixID) 	
 		
 		
 #    def testKronecker(self)
@@ -147,8 +140,8 @@ if __name__ == '__main__':
     verbose = 1
     initialize_larc(26,24,10,-1,-1,verbose)
     create_report_thread(1800)
-    print("matrixID for 0 ", cvar.matID_scalar0)
-    print("matrixID for 1 ", cvar.matID_scalar1)
+    print("matrixID for 0 ", cvar.packedID_scalar0)
+    print("matrixID for 1 ", cvar.packedID_scalar1)
     
         # Define string for using in formating filenames
     scalarTypeStr = cvar.scalarTypeStr
@@ -157,14 +150,14 @@ if __name__ == '__main__':
     level = 2
     dim_whole = 2**level
     Z2_arr = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
-    Z2_matrixID = row_major_list_to_store_matrixID(list(map(str, Z2_arr)), level, level, dim_whole)
-    print_naive_by_matID(Z2_matrixID)
+    Z2_matrixID = row_major_list_to_store(list(map(str, Z2_arr)), level, level, dim_whole)
+    print_naive(Z2_matrixID)
     print("\nmatrixID for  the level 2 zero matrix\n", Z2_matrixID)
 
     # build Identity matrices
     I2_arr = [1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]
-    I2_matrixID = row_major_list_to_store_matrixID(list(map(str, I2_arr)), level, level, dim_whole)
-    print_naive_by_matID(I2_matrixID)
+    I2_matrixID = row_major_list_to_store(list(map(str, I2_arr)), level, level, dim_whole)
+    print_naive(I2_matrixID)
     print("\nmatrixID for  the level 2 identity matrix\n", I2_matrixID)
     
     unittest.main()

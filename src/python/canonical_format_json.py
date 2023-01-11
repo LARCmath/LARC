@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
- ##################################################################
+ #*################################################################
  #                                                                #
  # Copyright (C) 2014, Institute for Defense Analyses             #
  # 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           #
@@ -13,6 +13,7 @@
  #   - Steve Cuccaro (IDA-CCS)                                    #
  #   - John Daly (LPS)                                            #
  #   - John Gilbert (UCSB, IDA adjunct)                           #
+ #   - Mark Pleszkoch (IDA-CCS)                                   #
  #   - Jenny Zito (IDA-CCS)                                       #
  #                                                                #
  # Additional contributors are listed in "LARCcontributors".      #
@@ -50,7 +51,7 @@
  # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, #
  # EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.             #
  #                                                                #
- ##################################################################
+ #*################################################################
 
 from __future__ import print_function
 
@@ -63,7 +64,10 @@ import argparse
 from timeit import default_timer as timer
 
 
-
+## \file canonical_format_json.py
+#  \brief Read a LARCmatrix json file into LARC, and output a new LARCMatrix
+#  file for the matrix (usually with smaller matrixIDs)
+#
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description="This routine reads a LARCMatrix json file into the matrix store and then \n outputs a new json file containing the same matrix.  If the input json was in the legacy format \n (where scalar values were not strings) then you must set the flag --legacy to correctly \n read the file and convert to the new format.\n The output json comes from a nearly empty matrix store, hence will \n have matrixIDs that are usually smaller than those in the input file.")
@@ -92,9 +96,9 @@ if __name__ == '__main__':
 
     # read matrix into larc from file
     if args.legacy:
-        read_routine = pylarc.read_larcMatrix_file_legacy_return_matID
+        read_routine = pylarc.read_legacy_larcMatrixFile
     else:
-        read_routine = pylarc.read_larcMatrix_file_return_matID
+        read_routine = pylarc.read_larcMatrixFile
     if args.verbose:
         print("Reading in {}matrix...".format(args.legacy*"legacy "))
         matID = read_routine(args.matrix_in)
@@ -104,10 +108,10 @@ if __name__ == '__main__':
 
     if args.verbose:
         print("Writing matrix...")
-        pylarc.write_larcMatrix_file_by_matID(matID, args.matrix_out)
+        pylarc.fprint_larcMatrixFile(matID, args.matrix_out)
     else:
 #        with pylarc.stdout_redirected():
-        pylarc.write_larcMatrix_file_by_matID(matID, args.matrix_out)
+        pylarc.fprint_larcMatrixFile(matID, args.matrix_out)
 
 
     sys.exit(0)

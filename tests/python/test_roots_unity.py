@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
- ##################################################################
+ #*################################################################
  #                                                                #
  # Copyright (C) 2014, Institute for Defense Analyses             #
  # 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           #
@@ -13,6 +13,7 @@
  #   - Steve Cuccaro (IDA-CCS)                                    #
  #   - John Daly (LPS)                                            #
  #   - John Gilbert (UCSB, IDA adjunct)                           #
+ #   - Mark Pleszkoch (IDA-CCS)                                   #
  #   - Jenny Zito (IDA-CCS)                                       #
  #                                                                #
  # Additional contributors are listed in "LARCcontributors".      #
@@ -50,7 +51,7 @@
  # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, #
  # EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.             #
  #                                                                #
- ##################################################################
+ #*################################################################
 
 from __future__ import print_function
 
@@ -65,89 +66,53 @@ from ctypes import *
 if __name__ == '__main__':
 
 
-    #################################
-    ##   SET THESE PARAMETERS      ##
-    #################################
-    max_level = 8          ##  problem_size is always power of two!
+    #*###############################
+    #*   SET THESE PARAMETERS      #*
+    #*###############################
+    max_level = 8          #*  problem_size is always power of two!
 
     
-    ####################################################
-    ##   Find out if machine is desktop workstation   ##
-    ##   or a CPU-cycle servers (cs1-cs6)             ##
-    ####################################################
-    machine = os.uname()[1]
-    cs = 0        # on desktop workstation, with smaller memory
-    if (machine.find('cs') >= 0):
-        cs = 1    # on CPU-cycle server cs1-cs6, with larger memory
-        print("This machine is a CPU-cycle server")
-    else:
-        print("This machine is a desktop work station")
+    #*#####################################
+    #*    Print baseline usage report    #*
+    #*#####################################
+    pylarc.memory_and_time_report(0, "stdout")
 
 
-    #######################################
-    ##    Print baseline usage report    ##
-    #######################################
-    pylarc.rusage_report(0, "stdout")
+    #*##################################################################
+    #*    LARC  Initialization of Matrix Store and Operation Stores   #*
+    #*##################################################################
+    #* The routine initialize_larc() does the following:              #*
+    #* * creates the matrix and op stores                             #*
+    #* * preloads matrix store with: standard scalars and gates,      #*
+    #*   and with all zero, identity, and (integer) Hadamard matrices #*
+    #*   left to max matrix size                                      #*
+    #*##################################################################
 
-
-    ####################################################################
-    ##    LARCt Initialization of Matrix Store and Operation Stores   ##
-    ####################################################################
-    ## The routine initialize_larc() does the following:              ##
-    ## * creates the matrix and op stores                             ##
-    ## * preloads matrix store with: standard scalars and gates,      ##
-    ##   and with all zero, identity, and (integer) Hadamard matrices ##
-    ##   left to max matrix size                                      ##
-    ####################################################################
-
-    ####################################################################
-    ##    Testing to see what approximation functions.
-    ##    The zerobit thresh parameters that work for F_3 are:
-    ##      -z 53 and smaller
-    ##    The zerobit thresh parameters that fail for F_3 are:
-    ##      -z 54 and larger  
-    ## 
-    ##    The rounding function does not effect whether it
-    ##    works in ranges -s 10 to -s 1000
-    ## 
-    ## 
-    ####################################################################
-
-    
-    ## SMALL STORES for working on desktop
+    #* SMALL STORES for working on desktop
     if max_level <= 8:    
         matrix_exponent = 22
         op_exponent = 19   
 
-        trunc_to_zero_bits = 50
-    ##  trunc_to_zero_bits = 52
-    ##  trunc_to_zero_bits = 54
-    ##  rnd_sig_bits = 1000
-        rnd_sig_bits = 30
+        zeroregionbitparam = 50
+    #*  zeroregionbitparam = 52
+    #*  zeroregionbitparam = 54
+    #*  regionbitparam = 1000
+        regionbitparam = 30
 
-        ######################################################
-        ##  Sample failure values for LARC approximation    ##
-        ##  are to set         rnd_sig_bits = 60            ##
-        ##  and                trunc_to_zero_bits = 60      ##
-        ######################################################
-        ##  Default values for LARC approximation are       ##
-        ##  both equal to DBL_MANT_DIG -2                   ##
-        ##  rnd_sig_bits = -1    # default is 53 bits       ##
-        ##  trunc_to_zero_bits = -1 # OLD default is 1074 bits  ##
-        ##  trunc_to_zero_bits = -1 # OLD default is 1074 bits  ##
-        ##  NOTE:  testing shows -z 47 will work            ##
-        ######################################################
-        # trunc_to_zero_bits = 52
+       #*####################################################
+        #*  Sample failure values for LARC LSH parameters #*
+        #*  are to set         regionbitparam = 60            #*
+        #*  and                zeroregionbitparam = 60      #*
+        #*####################################################
+        #*  Default values for LARC LSH parameters are       #*
+        #*  both equal to LDBL_MANT_DIG -2 when scalarType is Real #*
+        #*  regionbitparam = -1    #                        #*
+        #*  zeroregionbitparam = -1 # default is regionbitparam #*
+        #*  NOTE:  testing shows -z 47 will work            #*
+        #*####################################################
 
-
-        ######################################################
-        ##  TODO: find out the space in which this test fails!!!
-        ##  DBL_MANT_DIG is the number of digits in FLT_MANT  ##
-        ##  why aren't we using DBL_MANT_BITS  ??????? the number of bits
-        ##  used in the mantissa
-        ######################################################
         verbose = 1
-        pylarc.initialize_larc(matrix_exponent,op_exponent,max_level,rnd_sig_bits,trunc_to_zero_bits,verbose)
+        pylarc.initialize_larc(matrix_exponent,op_exponent,max_level,regionbitparam,zeroregionbitparam,verbose)
         pylarc.create_report_thread(180)
         print_naive = 1
         print_nonzeros = 1
@@ -160,18 +125,18 @@ if __name__ == '__main__':
            print("  will print files of nonzero matrices\n")
         else: 
            print("  not printing files of nonzero matrices\n")
-    ## LARGE STORES for cs1l,cs4l,cs9l
+    #* LARGE STORES
     else:      
-        ## matrix_exponent = 26
-        ## op_exponent = 24
+        #* matrix_exponent = 26
+        #* op_exponent = 24
         matrix_exponent = 30
         op_exponent = 31   
-        rnd_sig_bits = -1 # default value
-        trunc_to_zero_bits = -1 # default value
-        ## trunc_to_zero_bits = 20 # truncate to zero if value is less than 2**(-threshold)
-        ## trunc_to_zero_bits = 16 # truncate to zero if value is less than 2**(-threshold)
+        regionbitparam = -1 # default value
+        zeroregionbitparam = -1 # default value
+        #* zeroregionbitparam = 20 # truncate to zero if value is less than 2**(-threshold)
+        #* zeroregionbitparam = 16 # truncate to zero if value is less than 2**(-threshold)
         verbose = 0
-        pylarc.initialize_larc(matrix_exponent,op_exponent,max_level,rnd_sig_bits,trunc_to_zero_bits,verbose)
+        pylarc.initialize_larc(matrix_exponent,op_exponent,max_level,regionbitparam,zeroregionbitparam,verbose)
         pylarc.create_report_thread(3600)   # once per hour 3600
         print_naive = 0      
         print_nonzeros = 0
@@ -186,21 +151,21 @@ if __name__ == '__main__':
            print("  not printing files of nonzero matrices\n")
 
     print("Finished creating LARC matrix and op stores and loading basic matrices.\n")
-    print("Seppuku check to see if program is to large to occur once every 10 minutes.\n")
+    print("stopHogging check to see if program is too large, to occur once every 10 minutes.\n")
 
 
-    #########################
+    #*#######################
     # print roots of unity  #
-    #########################
+    #*#######################
     # verbose = 0
     # n = 4
     # print("\nRunning code to produce the %d-th roots of unity." %n)
     # pylarc.print_n_th_roots_of_unity(4,verbose)
     # # pylarc.print_n_th_roots_of_unity(24,verbose)
 
-    ####################################################
+    #*##################################################
     # load principal root of unity and return matrixID #
-    ####################################################
+    #*##################################################
     # verbose = 0
     # print("\nRunning code to produce the matrixID for the n-th principal root of unity.")
     # p1_mID = pylarc.principal_n_th_root_of_unity_matID(1, verbose)
@@ -215,12 +180,12 @@ if __name__ == '__main__':
     # # print("principal nth root of unity for n=24 has matrixID %d" %p24_mID)
 
 
-    #################################################################
-    # fill an array with the matrixIDs of the nth roots of unity   ##
-    # verbose = 0 is run quiet, verbose = 1 subroutines chatty, and  ##
-    # verbose = 2 both local and subroutine calls chatty as well.   ##
-    #################################################################
-    ## verbose = 2
+    #*###############################################################
+    # fill an array with the matrixIDs of the nth roots of unity   #*
+    # verbose = 0 is run quiet, verbose = 1 subroutines chatty, and  #*
+    # verbose = 2 both local and subroutine calls chatty as well.   #*
+    #*###############################################################
+    #* verbose = 2
     verbose = 1
     if (verbose>1):
         call_verbose = 1
@@ -232,21 +197,21 @@ if __name__ == '__main__':
     if (verbose>1):
         print("The length of the array is %d" %len(n_array))
     for k in range(n):
-        n_array[k]  = pylarc.k_th_power_of_n_th_root_of_unity_matID(k,n,call_verbose)
+        n_array[k]  = pylarc.k_th_power_of_n_th_root_of_unity_pID(k,n,call_verbose)
     print("\nHere is the array of the %dth roots of unity:" %n)   
     print(n_array)
     if (verbose>1):
         print("\nThe stored values of these roots are:")
         print("")
         for k in range(n):
-           pylarc.print_naive_by_matID(n_array[k])
+           pylarc.print_naive(n_array[k])
            print("")
     print("\nNow we can look to see if multiplication is closed, by looking")
     print("at the matrixIDs of products of pairs of these roots.")
     success = 1
     for k in range(n):
         for j in range(k+1):
-            my_matrixID = pylarc.matrix_mult_matrixID(n_array[j],n_array[k])
+            my_matrixID = pylarc.matrix_mult(n_array[j],n_array[k])
             flag = 0  # initialize as though there was a closure failure
             for i in range(n):
                 if (my_matrixID == n_array[i]):
@@ -257,7 +222,7 @@ if __name__ == '__main__':
                 print("since the product of the %d-th power and %d-th power" %(j,k,))
                 m = (j+k) % n
                 print("which should have been the %d-th power which had value" %m )
-                pylarc.print_naive_by_matID(n_array[m])
+                pylarc.print_naive(n_array[m])
 
                 print("The computed result has matrixID %g instead of %g" %(my_matrixID,
                                                                             n_array[m]))
@@ -269,12 +234,12 @@ if __name__ == '__main__':
         print("All products of pairs of roots of unity produce existing roots.")
     else:
         print("At least one product of roots of unity produced a value")
-        print("that was not a preloaded root of unity, so nbhd hash is not optimal.")
+        print("that was not a preloaded root of unity, so locality-sensitive hash is not optimal.")
         
 
     # sys.exit(0)
 
-    ## OLDER VERSION OF CODE
+    #* OLDER VERSION OF CODE
     # verbose = 1
     # if (verbose>1):
     #     call_verbose = 1
@@ -286,7 +251,7 @@ if __name__ == '__main__':
     # if (verbose>1):
     #     print("The length of the array is %d" %len(n5_array))
     # for k in range(n):
-    #     n5_array[k]  = pylarc.k_th_power_of_n_th_root_of_unity_matID(k,n,call_verbose)
+    #     n5_array[k]  = pylarc.k_th_power_of_n_th_root_of_unity_pID(k,n,call_verbose)
     # print("\nHere is the array of matrixIDs of the %dth roots of unity:" %n)
     # print(n5_array)
     # if (verbose>1):
@@ -295,38 +260,38 @@ if __name__ == '__main__':
     #     for k in range(n):
     #        print("The matrixID is %d" %n5_array[k])
     #        print("The %d-th power of the %d-th root of unity is" %(k,n))
-    #        pylarc.print_naive_by_matID(n5_array[k])
+    #        pylarc.print_naive(n5_array[k])
     #        print("")
     # print("\nNow we can look to see if multiplication is closed, by looking")
     # print("at the matrixIDs of products of pairs of these roots.")
     # for k in range(n):
     #     for j in range(k+1):
-    #         my_matrixID = pylarc.matrix_mult_matrixID(n5_array[j],n5_array[k])
+    #         my_matrixID = pylarc.matrix_mult(n5_array[j],n5_array[k])
     #         print("The (%d,%d)th product has matrix ID" %(j,k))
     #         print(my_matrixID)
     # print("\n")
 
     # print("\nTODO: Fix these non desirable:")
     # print("\nFor n = 5 we see that the product of the 1st and 4th roots,")
-    # my_matrixID = pylarc.matrix_mult_matrixID(n5_array[1],n5_array[4])
+    # my_matrixID = pylarc.matrix_mult(n5_array[1],n5_array[4])
     # print("the (%d,%d)th product has matrix ID" %(1,4))
     # print(my_matrixID)
     # print("which has stored value")
-    # pylarc.print_naive_by_matID(my_matrixID)
+    # pylarc.print_naive(my_matrixID)
     # print("")
-    # print("Whereas if the nbhd hash was perfect we expected to see")
+    # print("Whereas if the locality-sensitive hash was perfect we expected to see")
     # print(n5_array[0])
     # print("which has stored value")
-    # pylarc.print_naive_by_matID(n5_array[0])
+    # pylarc.print_naive(n5_array[0])
 
 
-    # mID = pylarc.matrix_diff_matrixID(int64_t A_mID, int64_t B_mID)
+    # mID = pylarc.matrix_diff(int64_t A_mID, int64_t B_mID)
     # get numerical value mID
     # if val
     # i = 1
     # while value > 1/(2^i)for i in 
     #     see if the value is < 
-    #         my_matrixID = pylarc.matrix_mult_matrixID(n5_array[j],n5_array[k])
+    #         my_matrixID = pylarc.matrix_mult(n5_array[j],n5_array[k])
     #         print("The (%d,%d)th product has matrix ID" %(j,k))
     #         print(my_matrixID)
     # print("\n")

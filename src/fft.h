@@ -12,6 +12,7 @@
  *   - Steve Cuccaro (IDA-CCS)                                    *
  *   - John Daly (LPS)                                            *
  *   - John Gilbert (UCSB, IDA adjunct)                           *
+ *   - Mark Pleszkoch (IDA-CCS)                                   *
  *   - Jenny Zito (IDA-CCS)                                       *
  *                                                                *
  * Additional contributors are listed in "LARCcontributors".      *
@@ -61,65 +62,66 @@ extern "C" {
 #include <stdint.h>       // int64_t 
 
 #include "larc.h"         // mat_level_t
-#include "matrix_store.h" // mat_ptr_t
+#include "matrix_store.h" // mats_ptr_t, matns_ptr_t
+#include "scalars.h"      // conversion function
 
-/* The create_perm_inv(mat_level_t n) function
-   takes the size of the matrix and returns a matrix PTR
-   corresponding the inverse permution matrix */
-mat_ptr_t create_perm_inv(mat_level_t n);
+/*!
+ * \ingroup larc
+ * \brief Generates or finds the inverse shuffle permutation matrix of the given level
+ * \param m_lev The level of the inverse shuffle matrix to generate or find
+ * \return The packedID for the inverse shuffle matrix
+ */
+int64_t create_invShufMat(mat_level_t m_lev);
 
-/* The create_fft_D(mat_level_t n) function
-   takes the size of the matrix and returns a matrix PTR
-   corresponding the D matrix for the fft recursion*/
-mat_ptr_t create_fft_D(mat_level_t n); 
+/*!
+ * \ingroup larc
+ * \brief Generates or finds the diagonal D matrix of the desired level, for use in a sparse block recursive DFT
+ * \param m_lev The level of the D matrix to generate or find
+ * \return The packedID for the D matrix
+ */
+int64_t create_FFT_DMat(mat_level_t m_lev);
 
-/* return the matrix pointer for the first (2^n)-th root of unity */
-mat_ptr_t get_first_pow2_root_unity(mat_level_t n);
+/*!
+ * \ingroup larc
+ * \brief Prints the (2^pow)-th roots of unity 
+ * \param pow The power of two to use 
+ * \return 0 on success
+ */
+int print_pow2_roots_unity(uint32_t pow);
 
-/* The create_fft_C(mat_level_t n) function
-   takes the size of the matrix and returns a matrix PTR
-   corresponding the C matrix for the fft recursion*/
-mat_ptr_t create_fft_C(mat_level_t n); 
+/*!
+ * \ingroup larc
+ * \brief  Returns the principal (2^pow)-th root of unity, e^{i 2 pi/2^pow} and either loads or finds it in the matrix_store 
+ * \param pow The log base 2 of the power of unity to generate
+ * \return The packedID for the generated root of unity
+ */
+int64_t principal_pow2_root_unity_pID(uint32_t pow);
 
-/* The create_fft_matrix(mat_level_t n) function
-   takes the size of the matrix and returns a matrix PTR
-   corresponding to the fft matrix */
-mat_ptr_t create_fft_matrix(mat_level_t n); 
+/*!
+ * \ingroup larc
+ * \brief Generates or finds the block C matrix of the desired level, for use in a sparse block recursive DFT
+ * \param m_lev The level of the C matrix (to generate or find)
+ * \return The packedID for the C matrix
+ */
+int64_t create_FFT_CMat(mat_level_t m_lev);
 
-/* Python Interface for the create_perm_inv(mat_level_t n) function.
-   This takes the size of the matrix and returns a matrix ID
-   corresponding the inverse permution matrix */
-int64_t create_perm_inv_matrixID(mat_level_t n);
+/*!
+ * \ingroup larc
+ * \brief Generates an FFT matrix of the desired size
+ * \param m_lev The level of the matrix generated
+ * \return The packedID for the generated matrix
+ */
+int64_t create_FFTMat(mat_level_t m_lev);
 
-/* Python Interface for the create_fft_D(mat_level_t n) function.
-   This takes the size of the matrix and returns a matrix ID
-   corresponding the D matrix needed for the fft recursion */
-int64_t create_fft_D_matrixID(mat_level_t n);
-
-/* prints the (2^n)-th roots of unity */
-int print_pow2_roots_unity(mat_level_t n);
-
-/* returns the matrixID of the principal (2^n)-th root of unity */ 
-int64_t principal_pow2_root_unity(mat_level_t n);
-
-/* Python Interface for the create_fft_C(mat_level_t n) function.
-   This takes the size of the matrix and returns a matrix ID
-   corresponding the C matrix needed for the fft recursion */
-int64_t create_fft_C_matrixID(mat_level_t n);
-
-/* Python Interface for the create_fft_matrix(mat_level_t n) function.
-   This takes the size of the matrix and returns a matrix ID
-   corresponding to the fft matrix */
-int64_t create_fft_matrix_matrixID(mat_level_t n);
-
-/* prints the n-th roots of unity */
-int print_n_th_roots_of_unity(int n, int verbose);
-  
-/* return the matrix ID for the principal n-th root of unity */
-int64_t principal_n_th_root_of_unity_matID(int n, int verbose);
-
-/* return matrix ID for k-th power of the n-th principal root of unity */
-int64_t k_th_power_of_n_th_root_of_unity_matID(int k, int n, int verbose);
+/*!
+ * \ingroup larc
+ * \brief Returns the packedID for larc matrix containing the scalar e^{i 2 pi k/n}, the  k-th power of n-th principal root-of-unity
+ * \param k The integer exponent to which to put the n-th root of unity
+ * \param n The integer specifying the n-th root-of-unity
+ * \param verbose
+ * \return The packedID for the larc matrix record for scalar e^{i 2 pi k/n}
+ */
+int64_t k_th_power_of_n_th_root_of_unity_pID(int k, int n, int verbose);
   
 
 #ifdef __cplusplus

@@ -12,6 +12,7 @@
  *   - Steve Cuccaro (IDA-CCS)                                    *
  *   - John Daly (LPS)                                            *
  *   - John Gilbert (UCSB, IDA adjunct)                           *
+ *   - Mark Pleszkoch (IDA-CCS)                                   *
  *   - Jenny Zito (IDA-CCS)                                       *
  *                                                                *
  * Additional contributors are listed in "LARCcontributors".      *
@@ -63,7 +64,9 @@
 
 // Unfortunately math.h doesn't contain a max and min
 #define MAX(x,y) ((x > y) ? x : y)
+        /*!< Computes the maximum of \a x and \a y. */
 #define MIN(x,y) ((x < y) ? x : y)
+        /*!< Computes the minimum of \a x and \a y. */
 
 #ifndef SWIG
 
@@ -85,8 +88,8 @@ typedef struct scratchVars_s {
     // for saving the level of the original call of a recursive routine
     mat_level_t top_level;
 
-    // designed [to be calculated and then] submitted to get_valMatPTR_from_val
-    // guarantee that submit_to_store is never used in get_valMatPTR_from_val
+    // designed to be calculated and then submitted to get_scalarPTR_for_scalarVal
+    // guarantee that submit_to_store is never used in get_scalarPTR_for_scalarVal
     scalarType submit_to_store;
     // for use when computing the conjugate
     scalarType calc_conj;
@@ -94,27 +97,40 @@ typedef struct scratchVars_s {
     scalarType quick_use;
     // for general use or for some unknown purpose we haven't thought of yet. 
     scalarType misc;
-
     // for counting some value that accrues over multiple [recursive] calls
     mpz_t counter;     
-    // for use in locality approximation rounding 
+    // for use in Single-tile Probabilistic Retrieval hashing (SPR), and
+    // possibly as additional scratch space for MAR (approx_value is thus used)
     scalarType approx_value;
-#if defined(USE_MPRATIONAL) || defined(USE_MPRATCOMPLEX) || defined(USE_MPREAL) || defined(USE_MPCOMPLEX)
     mpz_t mpinteger;
-#endif
-#if defined(USE_MPRATIONAL) || defined(USE_MPRATCOMPLEX)
     mpq_t mprational;
-#endif
-#if defined(USE_MPINTEGER) || defined(USE_MPREAL) || defined(USE_MPCOMPLEX)
+    mpq_t mprational2;
     mpfr_t mpreal;
-#endif
+#ifdef USE_CLIFFORD
+    clifford_t clifford;
+#endif  // #ifdef USE_CLIFFORD
+
+    // FLAGS to prevent accidental overwrite
+    unsigned int submit_to_store_in_use	: 1;
+    unsigned int calc_conj_in_use	: 1;
+    unsigned int quick_use_in_use	: 1;
+    unsigned int misc_in_use		: 1;
+    unsigned int counter_in_use		: 1;
+    unsigned int approx_value_in_use	: 1;
+    unsigned int mpinteger_in_use	: 1;
+    unsigned int mprational_in_use	: 1;
+    unsigned int mprational2_in_use	: 1;
+    unsigned int mpreal_in_use		: 1;
+    unsigned int clifford_in_use	: 1;
 
 } scratchVars_t;
 
 extern scratchVars_t scratchVars;
+#endif  // #ifndef SWIG
 
-#endif
+extern const mpfr_prec_t mpreal_precision;
 
+#ifndef SWIG
 /*!
  * \ingroup larc
  *
@@ -123,6 +139,7 @@ extern scratchVars_t scratchVars;
  * Note that scalar routines must be loaded before this can run. 
  */
 void scratchVars_init();
+
 /*!
  * \ingroup larc
  *
@@ -135,22 +152,60 @@ void scratchVars_init();
  */
 void scratchVars_exitroutine(mat_level_t current_level);
 
-extern pthread_t thd;
+/*!
+ * \ingroup larc
+ * \brief Frees the memory allocated to the scratchVars structure.
+ *
+ * This routine is called by shutdown_larc. It should not be called by
+ * any other routine.
+ */
+void scratchVars_clear(void);
+
 /*!
  * \ingroup larc
  * \brief Gives names to certain global constants and 2x2 matrices, and when necessary stores and locks them.
  */
 void init_globals(void);
 
-// this passes information to python about current scalarType
+/*!
+ * \ingroup larc
+ * \brief Frees memory allocated in init_globals.
+ *
+ * This routine is called by shutdown_larc. It should not be called from any
+ * other routine.
+ */
+void clear_globals(void);
+#endif  // #ifndef SWIG
+
+// this is used to pass information to python about current scalarType
 extern char scalarTypeDef;
 extern char* scalarTypeStr;
+
+// this is used to pass information to python about whether
+// we are in MAR (1) or SPR (0) mode for locality hashing
+extern int MARmode;
 
 
 #ifndef SWIG
 /***************************************************
  * FREQUENTLY USED SCALARS ARE GIVEN GLOBAL NAMES *
  ***************************************************/
+
+#ifdef MAR
+#ifndef IS_INTEGER
+/*********************************************
+ *   variables used during MAR calculations *
+ *********************************************/
+extern scalarType regionCenter;
+extern scalarType REGIONWIDTH, NEGREGIONWIDTH;
+#ifdef IS_COMPLEX
+extern scalarType REGIONWIDTH_X_I, NEGREGIONWIDTH_X_I;
+extern scalarType neighbor_centers[3];
+#else
+extern scalarType neighbor_center;
+#endif  // #ifdef IS_COMPLEX
+#endif  // #ifndef IS_INTEGER
+#endif  // #ifdef MAR
 
 /*********************************************
  *       values of SCALAR type               * 
@@ -159,22 +214,17 @@ extern char* scalarTypeStr;
 extern scalarType scalar0;
 extern scalarType scalar1;
 extern scalarType scalarM1; //'minus 1'
-#if defined(USE_REAL) || defined(USE_COMPLEX) || defined(USE_MPREAL) || defined(USE_MPCOMPLEX) || defined(USE_MPRATIONAL) || defined(USE_MPRATCOMPLEX)
+#ifndef IS_INTEGER
 extern scalarType scalar0_5;
 extern scalarType scalarM0_5;
-extern scalarType scalar_inv_sqrt_2;
-extern scalarType scalar_neg_inv_sqrt_2;
-#endif
-#if defined(USE_COMPLEX) || defined(USE_MPCOMPLEX) || defined(USE_MPRATCOMPLEX)
+#endif  // #ifndef IS_INTEGER
+#ifdef IS_COMPLEX
 extern scalarType scalar0i1;
 extern scalarType scalar0iM1;
 extern scalarType scalar0i0_5;
 extern scalarType scalar0iM0_5;
-extern scalarType scalar_i_inv_sqrt_2;
-extern scalarType scalar_plus_root_i;
-extern scalarType scalar_minus_root_i;
-#endif 
-#endif
+#endif  // #ifdef IS_COMPLEX
+#endif  // #ifndef SWIG
 
 
           /***************************************************
@@ -184,36 +234,27 @@ extern scalarType scalar_minus_root_i;
 /*********************************************
  *       matrices of SCALAR type             * 
  ********************************************/
-extern int64_t matID_scalar0;
-extern int64_t matID_scalar1;
-extern int64_t matID_scalarM1;
-#if defined(USE_REAL) || defined(USE_COMPLEX) || defined(USE_MPREAL) || defined(USE_MPCOMPLEX) || defined(USE_MPRATIONAL) || defined(USE_MPRATCOMPLEX)
-extern int64_t matID_scalar0_5;
-extern int64_t matID_scalarM0_5;
-extern int64_t matID_inv_sqrt_2;
-extern int64_t matID_neg_inv_sqrt_2;
-#endif  
-#if defined(USE_COMPLEX) || defined(USE_MPCOMPLEX) || defined(USE_MPRATCOMPLEX)
-extern int64_t matID_scalar0i1;   // scalar 0.0 + i*1.0
-extern int64_t matID_scalar0iM1;  // scalar 0.0 - i*1.0
-extern int64_t matID_scalar0i0_5;
-extern int64_t matID_scalar0iM0_5;
-extern int64_t matID_i_inv_sqrt_2;
-extern int64_t matID_plus_root_i;
-extern int64_t matID_minus_root_i;
-#endif  
+extern int64_t packedID_scalar0;
+extern int64_t packedID_scalar1;
+extern int64_t packedID_scalarM1;
+#ifndef IS_INTEGER
+extern int64_t packedID_scalar0_5;
+extern int64_t packedID_scalarM0_5;
+#endif  // #ifndef IS_INTEGER 
+#ifdef IS_COMPLEX
+extern int64_t packedID_scalar0i1;   // scalar 0.0 + i*1.0
+extern int64_t packedID_scalar0iM1;  // scalar 0.0 - i*1.0
+extern int64_t packedID_scalar0i0_5;
+extern int64_t packedID_scalar0iM0_5;
+#endif  // #ifdef IS_COMPLEX
 
 /*****************************************************
  *   square matrices of MATRIX type level > 0        *
  *****************************************************/
-extern int64_t matID_I1;     // 1-bit identity matrix
-extern int64_t matID_NOT;     // 1-bit NOT / bitflip matrix
-extern int64_t matID_HH1;    // sqrt(2) * Hadamard matrix
-#if defined(USE_REAL) || defined(USE_COMPLEX) || defined(USE_MPREAL) || defined(USE_MPCOMPLEX) || defined(USE_MPRATIONAL) || defined(USE_MPRATCOMPLEX)
-extern int64_t matID_H1;     // Hadamard matrix
-#endif
+extern int64_t packedID_I1;     // 1-bit identity matrix
+extern int64_t packedID_NOT;     // 1-bit NOT / bitflip matrix
+extern int64_t packedID_HH1;    // sqrt(2) * Hadamard matrix
 
 
-
-#endif
+#endif  // #ifndef GLOBAL_H
 
