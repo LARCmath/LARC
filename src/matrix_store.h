@@ -1,7 +1,7 @@
 //                   matrix_store.h
 /******************************************************************
  *                                                                *
- * Copyright (C) 2014, Institute for Defense Analyses             *
+ * Copyright (C) 2014-2024, Institute for Defense Analyses        *
  * 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           *
  * This material may be reproduced by or for the US Government    *
  * pursuant to the copyright license under the clauses at DFARS   *
@@ -465,9 +465,7 @@ const mpfr_t* const get_zerorealthresh(void);
 #else
 double get_zerorealthresh(void);
 #endif  // IS_RATIONAL
-#endif // SPRmode
 
-#ifndef MAR //SPRmode  
 /*!
  * \ingroup larc
  * \brief Retreive the SPR parameter determining whether zero regions are calculated differently
@@ -605,7 +603,8 @@ inline int64_t get_pID_from_array_of_four_sub_pIDs(int64_t pID[4],
  * \brief Returns the number of scalars currently in memory
  * \return The desired value
  */
-size_t scalar_store_count(void); /*!
+size_t scalar_store_count(void);
+/*!
  * \ingroup larc
  * \brief Returns the number of matrices (excluding scalars) in memory 
  * \return The desired value
@@ -658,22 +657,45 @@ int fprint_store_info_for_matrixID_range(uint64_t start, uint64_t end,
 
 /*!
  * \ingroup larc
- * \brief Prints statistical information about a matrix store hash chain to a file
+ * \brief Prints statistical information about a nonscalar store hash chain to a file
  * \param hash The hash identifying which hash chain to report on
  * \param outfilepath Identifies the file to which the info is printed
  * \param comment A string printed at the top of the file
  * \return 1 on success, 0 otherwise
  */
-int fprint_matrix_hash_chain_info(uint64_t hash, char *outfilepath, char *comment);
+int fprint_nonscalar_hash_chain_info(uint64_t hash, char *outfilepath, char *comment);
 
 /*!
  * \ingroup larc
- * \brief Prints statistical information about a matrix store hash chain to stdout
+ * \brief Prints statistical information about a nonscalar store hash chain to stdout
  * \param hash The hash identifying which hash chain to report on
  * \param comment A string printed at the top of the file
  * \return 1 on success, 0 otherwise
  */
-int print_matrix_hash_chain_info(uint64_t hash, char *comment);
+int print_nonscalar_hash_chain_info(uint64_t hash, char *comment);
+
+/*!
+ * \ingroup larc
+ * \brief Write the scalar hash chain information to the specified file.
+ *
+ * \param hash Which hash chain to scan
+ * \param outfilepath File name for output file
+ * \param comment Comment string to place in output file
+ * \returns Return code
+ */
+int fprint_scalar_hash_chain_info(uint64_t hash, char *outfilepath,
+	char *comment);
+
+/*!
+ * \ingroup larc
+ * \brief Write the scalar hash chain information to the screen
+ *
+ * \param hash Which hash chain to scan
+ * \param comment Comment string printed to screen
+ * \returns Return code
+ */
+int print_scalar_hash_chain_info(uint64_t hash, char *comment);
+
 
 /*!
  * \ingroup larc
@@ -708,11 +730,21 @@ int64_t get_counts_square_matrices_by_level(uint64_t i);
 
 /*!
  * \ingroup larc
- * \brief Counts the number of entries in a specific hash chain in the matrix store
+ * \brief Counts the number of entries in a specific hash chain in the nonscalar store
  * \param i Identifies the hash chain to be counted
  * \return The length of the chain
  */
-int64_t matrix_hash_chain_length(uint64_t i);
+int64_t nonscalar_hash_chain_length(uint64_t i);
+
+/*!
+ * \ingroup larc
+ * \brief Return the length of the specified scalar hash chain.
+ *
+ * \param i Which hash chain to process
+ * \returns Length of hash chain i
+ */
+int64_t scalar_hash_chain_length(uint64_t i);
+
 
 #ifdef HASHSTATS
 

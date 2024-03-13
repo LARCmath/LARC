@@ -1,7 +1,7 @@
 //                       matrix_store.c
 /******************************************************************
  *                                                                *
- * Copyright (C) 2014, Institute for Defense Analyses             *
+ * Copyright (C) 2014-2024, Institute for Defense Analyses        *
  * 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           *
  * This material may be reproduced by or for the US Government    *
  * pursuant to the copyright license under the clauses at DFARS   *
@@ -2138,7 +2138,7 @@ fprint_store_info_for_matrixID_range(uint64_t start, uint64_t end,
 }
 
 /***************************************************************************
-*                   fprint_matrix_hash_chain_info                         *
+*                   fprint_nonscalar_hash_chain_info                         *
 *  This function prints information about matrices to a file,			   *
 *  given the hash value for that chain.                                    *
 *  To get the appropriate hash value for the argument of this function     *
@@ -2147,7 +2147,7 @@ fprint_store_info_for_matrixID_range(uint64_t start, uint64_t end,
 *  also arguments.                                                         *
 ***************************************************************************/
 int
-fprint_matrix_hash_chain_info(uint64_t hash, char *outfilepath, char *comment)
+fprint_nonscalar_hash_chain_info(uint64_t hash, char *outfilepath, char *comment)
 {
   FILE *f; 
 
@@ -2184,18 +2184,8 @@ fprint_matrix_hash_chain_info(uint64_t hash, char *outfilepath, char *comment)
   return ret;
 } 
 
-
-/*!
- * \ingroup larc
- * \brief Write the scalar hash chain information to the specified file.
- *
- * \param hash Which hash chain to scan
- * \param outfilepath File name for output file
- * \param comment Comment string to place in output file
- * \returns Return code
- */
 int
-scalar_hash_chain_info_to_file(uint64_t hash, char *outfilepath, char *comment)
+fprint_scalar_hash_chain_info(uint64_t hash, char *outfilepath, char *comment)
 {
   FILE *f; 
 
@@ -2234,7 +2224,7 @@ scalar_hash_chain_info_to_file(uint64_t hash, char *outfilepath, char *comment)
 
 
 /***************************************************************************
-*                   print_matrix_hash_chain_info                       *
+*                   print_nonscalar_hash_chain_info                       *
 *  This function prints information about matrices given the hash value    *
 *  for that chain.                                                         *
 *  To get the appropriate hash value for the argument of this function     *
@@ -2242,11 +2232,18 @@ scalar_hash_chain_info_to_file(uint64_t hash, char *outfilepath, char *comment)
 *  A user comment to be printed is also an argument   					   *
 ***************************************************************************/
 int
-print_matrix_hash_chain_info(uint64_t hash, char *comment)
+print_nonscalar_hash_chain_info(uint64_t hash, char *comment)
 {
   char *filename = "stdout";
-  return fprint_matrix_hash_chain_info(hash, filename, comment);
+  return fprint_nonscalar_hash_chain_info(hash, filename, comment);
 } 
+
+int
+print_scalar_hash_chain_info(uint64_t hash, char *comment)
+{
+  char *filename = "stdout";
+  return fprint_scalar_hash_chain_info(hash, filename, comment);
+}
 
 #ifdef MAR
 static MAR_tile_index_t *get_tile_index_from_scalarPTR(mats_ptr_t s_ptr)
@@ -2713,7 +2710,7 @@ int64_t get_counts_square_matrices_by_level(uint64_t i)
 }
 
 
-int64_t matrix_hash_chain_length(uint64_t i)
+int64_t nonscalar_hash_chain_length(uint64_t i)
 {
   
   int counter = 0;
@@ -2737,14 +2734,6 @@ int64_t matrix_hash_chain_length(uint64_t i)
   else return(-1);
 }
 
-
-/*!
- * \ingroup larc
- * \brief Return the length of the specified scalar hash chain.
- *
- * \param i Which hash chain to process
- * \returns Length of hash chain i
- */
 int64_t scalar_hash_chain_length(uint64_t i)
 {
   

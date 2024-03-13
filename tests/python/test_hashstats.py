@@ -2,7 +2,7 @@
 
  #*################################################################
  #                                                                #
- # Copyright (C) 2014, Institute for Defense Analyses             #
+ # Copyright (C) 2014-2024, Institute for Defense Analyses        #
  # 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           #
  # This material may be reproduced by or for the US Government    #
  # pursuant to the copyright license under the clauses at DFARS   #
@@ -301,7 +301,7 @@ if __name__ == '__main__':
     comment = "hash chain before removal"
     filename = "../dat/out/hashChain.beforeMatrixRemove"
     out_path =  os.path.join(os.path.dirname(__file__),filename)
-    pylarc.fprint_matrix_hash_chain_info(hashID, out_path, comment)
+    pylarc.fprint_nonscalar_hash_chain_info(hashID, out_path, comment)
 
     
     # Test deletion of a matrix
@@ -320,7 +320,7 @@ if __name__ == '__main__':
     comment = "hash chain after removal"
     filename = "../dat/out/hashChain.afterMatrixRemove"
     out_path =  os.path.join(os.path.dirname(__file__),filename)
-    pylarc.fprint_matrix_hash_chain_info(hashID, out_path, comment)
+    pylarc.fprint_nonscalar_hash_chain_info(hashID, out_path, comment)
 
 
     pylarc.list_op_names()

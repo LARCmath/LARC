@@ -2,7 +2,7 @@
 //                  Matrix Information Store for LARC
 /******************************************************************
  *                                                                *
- * Copyright (C) 2014, Institute for Defense Analyses             *
+ * Copyright (C) 2014-2024, Institute for Defense Analyses        *
  * 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           *
  * This material may be reproduced by or for the US Government    *
  * pursuant to the copyright license under the clauses at DFARS   *
@@ -60,7 +60,7 @@
 #include <stdint.h>
 #include "larc.h"
 
-/*
+/*!
  * \ingroup larc
  * \brief Generates a hash value based on an input packedID and an info_type_t value
  * \param pID A packedID
@@ -163,16 +163,16 @@ int64_t get_info_hash(int64_t my_pID, const char *info_name);
  * \param comment A string that the user can have printed to that file
  * \return 1 on success
  */
-int fprint_info_from_hash_chain(uint64_t hash, char *outfilepath, char *comment);
+int fprint_info_hash_chain_info(uint64_t hash, char *outfilepath, char *comment);
 
 /*!
  * \ingroup larc
- * \brief Same as fprint_info_from_hash_chain except that the print is to stdout
+ * \brief Same as fprint_info_hash_chain_info except that the print is to stdout
  * \param hash The hash value for an infoStore hash chain
  * \param comment A string that the user can have printed to stdout
  * \return 1 on success
  */
-int print_info_from_hash_chain(uint64_t hash, char *comment);
+int print_info_hash_chain_info(uint64_t hash, char *comment);
 
 /*!
  * \ingroup larc

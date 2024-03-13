@@ -1,7 +1,7 @@
 //                            io.c 
 /******************************************************************
  *                                                                *
- * Copyright (C) 2014, Institute for Defense Analyses             *
+ * Copyright (C) 2014-2024, Institute for Defense Analyses        *
  * 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           *
  * This material may be reproduced by or for the US Government    *
  * pursuant to the copyright license under the clauses at DFARS   *
@@ -2680,7 +2680,107 @@ int64_t read_matrixMarketExchange_file(char * file_path)
 }  // end read_matrixMarketExchange_file
 
 
-size_t fprint_larcMatrixFile(int64_t m_pID, char *path)
+/*!
+ * \ingroup larc
+ * \brief This is an internal subroutine to write a LARCmatrix entry to a file.
+ *   If needed, sub-component entries will be written out first.
+ *
+ * \param f The open file pointer for the output file
+ * \param s The matrixID of the entry to be written out
+ * \param usasPTR The unique submatrix array structure for the matrix
+ * \param matID_map The array of renumbered matrix IDs
+ * \param map_counter A pointer to the next number to use for renumbering
+ * \param do_renumber If non-zero, renumber the matrix IDs on output
+ */
+static void recursive_larcMatrixFile_element_output(
+                FILE *f, int64_t s, usas_t *usasPTR,
+                int64_t *matID_map, int64_t *map_counter, int do_renumber)
+{
+    // if the array value is zero then we don't do anything for this s
+    if (usasPTR->array[s] == 0) return;
+
+    if (do_renumber) {
+        // map the value s to the smallest non-neg integer that we have not used yet
+        // then increment the map_counter
+        matID_map[s] = (*map_counter)++;
+    } else {
+        // Keep the matrix ID unchanged.
+        matID_map[s] = s;
+    }
+
+    if (usasPTR->array[s] == 1)
+    {
+        mats_ptr_t s_ptr =(mats_ptr_t)get_recordPTR_from_pID(
+            PID_FROM_SCALAR_MID(s),"",__func__,0);
+        // in COMPLEX case, write routine to output "a+I*b" as "a, b"
+        char *val_string =sca_get_readable_approx_str(s_ptr->scalar_value);
+        fprintf(f, "    \"%" PRId64 "\":[0, 0, \"%s\"],\n",
+            matID_map[s], val_string);
+        free(val_string);
+
+        // Set to zero so as not to print this element out twice.
+        usasPTR->array[s] = 0;
+    } // end scalar branch
+    else   // NONSCALAR
+    {
+        matns_ptr_t s_ptr = (matns_ptr_t)get_recordPTR_from_pID(
+            PID_FROM_NONSCALAR_MID(s),"",__func__,0);
+
+        // recursively print out sub-components first,
+        // if they haven't already been printed out yet.
+        for (int i = 0; i < 4; ++i) {
+            if (s_ptr->subMatList[i]!=MATRIX_ID_INVALID) {
+                int64_t submatrixID = MID_FROM_PID(s_ptr->subMatList[i]);
+                recursive_larcMatrixFile_element_output(f, submatrixID, usasPTR, matID_map, map_counter, do_renumber);
+            }
+        }
+
+        // print the panel, which contains matrixIDs for these matrices
+        // For ROW_VECTORS, COL_VECTORS and MATRICES there is a panel[0]
+        fprintf(f, "    \"%" PRId64 "\":[%d, %d, %" PRId64 ", ",
+            matID_map[s], s_ptr->row_level, s_ptr->col_level,
+            matID_map[MID_FROM_PID(s_ptr->subMatList[0])]);
+
+        // For ROW_VECTORS, MATRICES there is a panel[1]
+        // For COL_VECTORS print -1
+        if (s_ptr->subMatList[1]!=MATRIX_ID_INVALID)
+            fprintf(f, "%" PRId64 ", ",
+                matID_map[MID_FROM_PID(s_ptr->subMatList[1])]);
+        else { fprintf(f, "-1, "); }
+
+        // For COL_VECTORS, MATRICES there is a panel[2]
+        // For ROW_VECTORS print -1
+        if (s_ptr->subMatList[2]!=MATRIX_ID_INVALID)
+            fprintf(f, "%" PRId64 ", ",
+                matID_map[MID_FROM_PID(s_ptr->subMatList[2])]);
+        else { fprintf(f, "-1, "); }
+
+        // For MATRICES there is a panel[3]
+        // For ROW_VECTORS or COL_VECTORS print -1
+        if (s_ptr->subMatList[3]!=MATRIX_ID_INVALID)
+            fprintf(f, "%" PRId64 "],\n",
+                matID_map[MID_FROM_PID(s_ptr->subMatList[3])]);
+        else { fprintf(f, "-1],\n"); }
+
+        // Set to zero so as not to print this entry out twice.
+        usasPTR->array[s] = 0;
+    } // end nonscalar branch
+}
+
+
+/*!
+ * \ingroup larc
+ * \brief This is an internal subroutine to write a LARCmatrix to a file
+ *   with options to control the output order and whether or not the matrix IDs
+ *   are renumbered, and returns the LARCsize.
+ *
+ * \param m_pID The packedID of the matrix to be written in LARC format
+ * \param path The location of the new larcMatrix json file
+ * \param use_topLeft If non-zero, use top left order
+ * \param do_renumber If non-zero, renumber the matrix IDs on output
+ * \return The larcSize of the matrix with packedID m_pID
+ */
+static size_t fprint_larcMatrixFile_common(int64_t m_pID, char *path, int use_topLeft, int do_renumber)
 {
     if (m_pID == MATRIX_ID_INVALID)
     {
@@ -2741,8 +2841,13 @@ size_t fprint_larcMatrixFile(int64_t m_pID, char *path)
     // json file contains: matrixID_max, matid, info struct, table struct
 
     // print the matrixID_max, and matid to the file
-    fprintf(f, "{\n  \"matrixID_max\":%" PRIu64 ",\n  \"matid\":%" PRIu64 ",",
-	  usasPTR->larcSizeCounter, usasPTR->larcSizeCounter-1);
+    if (use_topLeft) {
+        fprintf(f, "{\n  \"matrixID_max\":%" PRIu64 ",\n  \"matid\":%" PRIu64 ",",
+              matrixID+1, matrixID);
+    } else {
+        fprintf(f, "{\n  \"matrixID_max\":%" PRIu64 ",\n  \"matid\":%" PRIu64 ",",
+              usasPTR->larcSizeCounter, usasPTR->larcSizeCounter-1);
+    }
 
     // print the InfoStore to the file
     int info_ret = write_infoStore_to_larcMatrix_file(m_pID, f);
@@ -2759,60 +2864,17 @@ size_t fprint_larcMatrixFile(int64_t m_pID, char *path)
 
     // print every submatrix s of matrix m (including itself)
     // this corresponds to everything where array value is 1 (for scalar)
-    // or 2 (for matrix)
-    //
-    // s is a matrixID not a packedID, and we will need to keep that in mind
-    for (int64_t s=0; s <= matrixID; ++s) {
-        // if the array value is zero then we don't do anything for this s
-        if (usasPTR->array[s] == 0) continue;
-
-	// map the value s to the smallest non-neg integer that we have not used yet
-	// then increment the map_counter
-	matID_map[s] = map_counter++;
-
-        if (usasPTR->array[s] == 1)
-        {
-             mats_ptr_t s_ptr =(mats_ptr_t)get_recordPTR_from_pID(
-                 PID_FROM_SCALAR_MID(s),"",__func__,0);
-             // in COMPLEX case, write routine to output "a+I*b" as "a, b"
-             char *val_string =sca_get_readable_approx_str(s_ptr->scalar_value);
-             fprintf(f, "    \"%" PRId64 "\":[0, 0, \"%s\"],\n",
-                 matID_map[s], val_string);
-             free(val_string);
-        } // end scalar branch
-        else   // NONSCALAR
-        {
-            matns_ptr_t s_ptr = (matns_ptr_t)get_recordPTR_from_pID(
-                PID_FROM_NONSCALAR_MID(s),"",__func__,0);
-
-            // print the panel, which contains matrixIDs for these matrices 
-            // For ROW_VECTORS, COL_VECTORS and MATRICES there is a panel[0]
-            fprintf(f, "    \"%" PRId64 "\":[%d, %d, %" PRId64 ", ",
-                matID_map[s], s_ptr->row_level, s_ptr->col_level,
-	        matID_map[MID_FROM_PID(s_ptr->subMatList[0])]);
-	
-            // For ROW_VECTORS, MATRICES there is a panel[1]
-            // For COL_VECTORS print -1
-            if (s_ptr->subMatList[1]!=MATRIX_ID_INVALID)
-                fprintf(f, "%" PRId64 ", ",
-	            matID_map[MID_FROM_PID(s_ptr->subMatList[1])]);
-            else { fprintf(f, "-1, "); }
-
-            // For COL_VECTORS, MATRICES there is a panel[2]
-            // For ROW_VECTORS print -1
-            if (s_ptr->subMatList[2]!=MATRIX_ID_INVALID)
-                fprintf(f, "%" PRId64 ", ",
-                    matID_map[MID_FROM_PID(s_ptr->subMatList[2])]);
-            else { fprintf(f, "-1, "); }
-	
-            // For MATRICES there is a panel[3]
-            // For ROW_VECTORS or COL_VECTORS print -1
-            if (s_ptr->subMatList[3]!=MATRIX_ID_INVALID)
-                fprintf(f, "%" PRId64 "],\n",
-                    matID_map[MID_FROM_PID(s_ptr->subMatList[3])]);
-            else { fprintf(f, "-1],\n"); }
-        } // end nonscalar branch
-    }  // end usasPTR->array loop
+    // or 2 (for matrix).
+    // Note that the array values are set back to 0 upon output, to avoid
+    // writing out the same entry twice.
+    if (use_topLeft) {
+        recursive_larcMatrixFile_element_output(f, matrixID, usasPTR, matID_map, &map_counter, do_renumber);
+    } else {
+        // s is a matrixID not a packedID, and we will need to keep that in mind
+        for (int64_t s=0; s <= matrixID; ++s) {
+            recursive_larcMatrixFile_element_output(f, s, usasPTR, matID_map, &map_counter, do_renumber);
+        }
+    }
 
     // end the table structure and the json file
     fprintf(f, "      \"end\":0 }\n}\n");
@@ -2825,6 +2887,25 @@ size_t fprint_larcMatrixFile(int64_t m_pID, char *path)
     free_usasPTR(usasPTR);
     free(matID_map);
 
+    return(larcSize);
+}
+
+// See io.h for doxygen comment.
+size_t fprint_larcMatrixFile(int64_t m_pID, char *path)
+{
+    size_t larcSize;
+
+    larcSize = fprint_larcMatrixFile_common(m_pID, path, 0, 1);
+    return(larcSize);
+}
+
+
+// See io.h for doxygen comment.
+size_t fprint_larcMatrixFile_topLeftOrder(int64_t m_pID, char *path)
+{
+    size_t larcSize;
+
+    larcSize = fprint_larcMatrixFile_common(m_pID, path, 1, 0);
     return(larcSize);
 }
 

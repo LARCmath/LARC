@@ -1,7 +1,7 @@
 //                       organize.h
 /******************************************************************
  *                                                                *
- * Copyright (C) 2014, Institute for Defense Analyses             *
+ * Copyright (C) 2014-2024, Institute for Defense Analyses        *
  * 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           *
  * This material may be reproduced by or for the US Government    *
  * pursuant to the copyright license under the clauses at DFARS   *
@@ -176,7 +176,7 @@ void explain_scalar_techniques();
  *  using a hash filter for  fast traversal of hash chains, and snapping a scalar to
  *  to previously-stored sufficiently-close scalar.
  */
-    void explain_hashing_uses_in_LARC();
+void explain_hashing_uses_in_LARC();
 
 
 /*!
@@ -185,7 +185,7 @@ void explain_scalar_techniques();
  *
  *  LARC has a short and elegant implementation of a multiplicative Fibonacci hash for 64-bit integers.  LARC uses this fundamental hash to build all other hash functions.
  */
-    void explain_multiplicative_Fibonacci_hash();
+void explain_multiplicative_Fibonacci_hash();
 
     
 /*!
@@ -200,7 +200,7 @@ void explain_scalar_techniques();
  *  List hashing is used in the OperationsStore to retrieve the results of
  *  operations that have already been carried out before.
  */
-    void explain_hashing_lists();
+void explain_hashing_lists();
 
 
 /*!
@@ -211,7 +211,7 @@ void explain_scalar_techniques();
  *  the various scalarTypes in a way that preserves the entropy
  *  of the underlying scalars.
  */
-    void explain_hashing_scalarTypes();
+void explain_hashing_scalarTypes();
 
 /*!
  * \ingroup larc
@@ -226,7 +226,7 @@ void explain_scalar_techniques();
  *  however, it might not snap to the one which is closest to the target
  * (if there is more than one stored scalar nearby).
  */
-    void explain_hashing_for_snapping_scalars();
+void explain_hashing_for_snapping_scalars();
 
 
 /*!
@@ -240,7 +240,7 @@ void explain_scalar_techniques();
  *  to see whether the value of the filter is correct, before a more 
  *  expensive part of the search is carried out.
  */
-    void explain_hash_filters();
+void explain_hash_filters();
 
 
 /*!
@@ -250,7 +250,7 @@ void explain_scalar_techniques();
  *  This function  describes how to get statistics on hash 
  *  chain length and what expected longest chain length should be.
  */
-    void explain_hash_statistics();
+void explain_hash_statistics();
     
     
   

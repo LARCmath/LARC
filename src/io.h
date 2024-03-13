@@ -1,7 +1,7 @@
 //                          io.h
 /******************************************************************
  *                                                                *
- * Copyright (C) 2014, Institute for Defense Analyses             *
+ * Copyright (C) 2014-2024, Institute for Defense Analyses        *
  * 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           *
  * This material may be reproduced by or for the US Government    *
  * pursuant to the copyright license under the clauses at DFARS   *
@@ -197,7 +197,7 @@ int64_t read_matrixMarketExchange_file(char * file_path);
 
 /*!
  * \ingroup larc
- * \brief Writes a LARCmatrix to a file and returns the LARCsize
+ * \brief Writes a LARCmatrix to a file and returns the LARCsize.
  *
  * \param m_pID The packedID of the matrix to be written in LARC format
  * \param path The location of the new larcMatrix json file
@@ -205,6 +205,15 @@ int64_t read_matrixMarketExchange_file(char * file_path);
  */
 size_t fprint_larcMatrixFile(int64_t m_pID, char *path);
 
+/*!
+ * \ingroup larc
+ * \brief Writes a LARCmatrix to a file in top left order and returns the LARCsize.
+ *
+ * \param m_pID The packedID of the matrix to be written in LARC format
+ * \param path The location of the new larcMatrix json file
+ * \return The larcSize of the matrix with packedID m_pID
+ */
+size_t fprint_larcMatrixFile_topLeftOrder(int64_t m_pID, char *path);
 
 /*!
  * \ingroup larc

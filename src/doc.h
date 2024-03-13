@@ -3,7 +3,7 @@
 /*!
 \mainpage
 
-Copyright (C) 2014, Institute for Defense Analyses            
+Copyright (C) 2014-2024, Institute for Defense Analyses       
 4850 Mark Center Drive, Alexandria, VA; 703-845-2500          
 This material may be reproduced by or for the US Government   
 pursuant to the copyright license under the clauses at DFARS  
@@ -64,7 +64,7 @@ which utilize LARC as a math library.
 
 These people include:
 Matt Calef, Bill Carlson, John Fregeau, Lisa Jones,
-Larry Hiller, James Howse, JKK, Steve Kratzer, 
+Larry Hiller, James Howse, Jakob Kaivo, Steve Kratzer,
 Laurie Law, Van Molino, Mark Motley, Mark Pleszkoch, 
 Michael Schneider, Doug Shors, Michelle Snider, 
 and Andy Wills.

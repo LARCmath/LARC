@@ -1,7 +1,7 @@
 //                         mar.h
 /******************************************************************
  *                                                                *
- * Copyright (C) 2014, Institute for Defense Analyses             *
+ * Copyright (C) 2014-2024, Institute for Defense Analyses        *
  * 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           *
  * This material may be reproduced by or for the US Government    *
  * pursuant to the copyright license under the clauses at DFARS   *
@@ -80,7 +80,6 @@
 #ifndef SWIG
 extern MAR_tile_index_t *GLOBAL_primary_tile_index_PTR;
 extern char Gpti_in_use;
-#endif // #ifndef SWIG
 
 void scratchVars_mar_init(void);
 void scratchVars_mar_clear(void);
@@ -135,8 +134,6 @@ void set_tile_index(MAR_tile_index_t *tile_index_PTR, int i, int j);
  */
 void get_tile_index(MAR_tile_index_t *tile_index_PTR,
 		    int tile_exp, const scalarType scalar);
-
-#ifndef SWIG
 
 
 /*!

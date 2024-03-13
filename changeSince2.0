@@ -41,6 +41,11 @@ IMPROVEMENTS:
     (and not callable by user)
   * update to LARCmatrix write routines to make them more efficient and to 
     consolidate multiple versions into one
+  * now have two routines that read LARCmatrix files, read_larcMatrixFile and
+    read_anyFormat_larcMatrixFile. The first of these is efficient on large
+    matrices stored in LARCmatrix format in files which are
+    character-by-character matches to the output of fprint_larcMatrixFile; the
+    second works on any valid LARCmatrix *.json file.
   * many LARC functions given new, more descriptive names
   * matrix cleaning implemented for MAR mode
   * reorganized functions specifically for SPR mode into their own spr.c file,
@@ -50,6 +55,11 @@ IMPROVEMENTS:
   * matrix writer now calculates LARCsize for all written matrices, adds value
     to InfoStore for the matrix
   * Makefile now links ncurses library instead of curses library
+  * Added copyright notice to all *.c and *.py files, and a few others;
+    updated date of copyright to "2014-2024"
+  * Extensive comments added to code.
+  * some functions that should have been callable from python now are
+  * some functions that should not have been callable from python now aren't
 
 ADDITIONS:
   * created separate hashtable for scalar and nonscalar matrices for reduced 

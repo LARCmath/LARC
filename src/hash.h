@@ -1,7 +1,7 @@
 //                       hash.h
 /******************************************************************
  *                                                                *
- * Copyright (C) 2014, Institute for Defense Analyses             *
+ * Copyright (C) 2014-2024, Institute for Defense Analyses        *
  * 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           *
  * This material may be reproduced by or for the US Government    *
  * pursuant to the copyright license under the clauses at DFARS   *
@@ -211,6 +211,7 @@ inline hash_node_t * hash_get_chain(hash_table_t *table, uint64_t hash_val)
 uint64_t
 region_hash_from_scalarType(scalarType scalar, uint64_t exponent);
 #endif  // SPRmode
+#endif  // ifndef SWIG
 
 /*!
  * \ingroup larc
@@ -222,7 +223,6 @@ region_hash_from_scalarType(scalarType scalar, uint64_t exponent);
  */
 uint64_t
 hash_from_matrix_subMatList(int64_t sub[4], matrix_type_t mat_type, uint64_t exponent);
-#endif
 
 /*!
  * \ingroup larc

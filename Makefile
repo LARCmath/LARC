@@ -1,7 +1,7 @@
 ##                   Makefile
 ###################################################################
  #                                                                #
- # Copyright (C) 2014, Institute for Defense Analyses             #
+ # Copyright (C) 2014-2023, Institute for Defense Analyses        #
  # 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           #
  # This material may be reproduced by or for the US Government    #
  # pursuant to the copyright license under the clauses at DFARS   #
@@ -93,7 +93,7 @@ endif
 GIT_COMMIT_DATE = $(shell git show -s --format=%ci)
 OPTS = -O2 -g -Wall -fPIC -DGIT_COMMIT_DATE="\"$(GIT_COMMIT_DATE)\""
 CFLAGS = $(OPTS) -I$(SRCDIR) -I$(MPIDIR) -I$(GMPIDIR) -std=gnu99
-LIBS = -L$(MPLDIR) -L$(GMPLDIR) -lncurses -lm -lmpc -lmpfr -lgmp -lpthread -ltinfo
+LIBS = -Wl,--copy-dt-needed-entries -L$(MPLDIR) -L$(GMPLDIR) -lncurses -lmpc -lmpfr -lgmp -lpthread -lm
 CC = gcc
 
 # The file larcSWIG_wrap.c is created by SWIG, and therefore may or may not

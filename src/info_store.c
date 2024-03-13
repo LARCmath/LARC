@@ -2,7 +2,7 @@
 //   Matrix Information Store for Global Recursive Compression Scheme
 /******************************************************************
  *                                                                *
- * Copyright (C) 2014, Institute for Defense Analyses             *
+ * Copyright (C) 2014-2024, Institute for Defense Analyses        *
  * 4850 Mark Center Drive, Alexandria, VA; 703-845-2500           *
  * This material may be reproduced by or for the US Government    *
  * pursuant to the copyright license under the clauses at DFARS   *
@@ -440,7 +440,7 @@ int64_t get_info_hash(int64_t my_pID, const char *info_name)
 
 
 /****************************************************************************
-*                   fprint_info_from_hash_chain                              *
+*                   fprint_info_hash_chain_info                              *
 *  This function prints information about info_store hash chain corresponding *
 *  to the given the hash value for that chain.                              *
 *  To get the appropriate hash value for the argument of this function      *
@@ -450,7 +450,7 @@ int64_t get_info_hash(int64_t my_pID, const char *info_name)
 *  also arguments.                                                          * 
 ****************************************************************************/
 int
-fprint_info_from_hash_chain(uint64_t hash, char *outfilepath, char *comment)
+fprint_info_hash_chain_info(uint64_t hash, char *outfilepath, char *comment)
 {
   FILE *f; 
   if (strcmp(outfilepath,"stdout"))  {
@@ -497,14 +497,14 @@ fprint_info_from_hash_chain(uint64_t hash, char *outfilepath, char *comment)
 
 
 /*************************************************************************** 
- *                   print_info_from_hash_chain                            *
- *  Calls fprint_info_from_hash_chain with stdout.                            *
+ *                   print_info_hash_chain_info                            *
+ *  Calls fprint_info_hash_chain_info with stdout.                            *
  ****************************************************************************/
 int 
-print_info_from_hash_chain(uint64_t hash, char *comment) 
+print_info_hash_chain_info(uint64_t hash, char *comment) 
 { 
   char *file_name = "stdout";  //print to screen
-  return  fprint_info_from_hash_chain(hash, file_name, comment); 
+  return  fprint_info_hash_chain_info(hash, file_name, comment); 
   
 }  
 
